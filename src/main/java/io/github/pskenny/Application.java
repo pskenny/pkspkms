@@ -1,0 +1,117 @@
+package io.github.pskenny;
+
+import net.sourceforge.argparse4j.ArgumentParsers;
+import net.sourceforge.argparse4j.impl.Arguments;
+import net.sourceforge.argparse4j.inf.ArgumentParser;
+import net.sourceforge.argparse4j.inf.ArgumentParserException;
+import net.sourceforge.argparse4j.inf.Subparsers;
+import net.sourceforge.argparse4j.inf.Namespace;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class Application {
+    private final Logger logger = LoggerFactory.getLogger(Application.class);
+
+    public static void main(String[] args) {
+        new Application(args);
+    }
+
+    public Application(String[] args) {
+        Namespace ns = parseArguments(args);
+
+        String command = ns.getString("command");
+        switch(command) {
+            case "server":
+                String directory = ns.getString("directory");
+                int port = ns.getInt("port");
+
+                new Server(directory).getJavalinApp()
+                        .start(port);
+                break;
+            case "export":
+                String dir = ns.getString("directory");
+                String query = ns.getString("query");
+                String type = ns.getString("type");
+                String output = ns.getString("output");
+//                boolean dryRun = ns.getBoolean("dry-run");
+
+                new Export(dir, false)
+                        .export(query, type, output);
+                break;
+            default:
+                logger.error("Unknown command: {}", command);
+                System.exit(1);
+        }
+    }
+    private Namespace parseArguments(String[] args) {
+        ArgumentParser parser = ArgumentParsers.newFor("pkspkms").build()
+                .description("PKSPKMS program");
+
+        Subparsers subparsers = parser.addSubparsers()
+                .dest("command");
+        addServerSubparser(subparsers);
+        addExportSubparser(subparsers);
+
+        Namespace ns = null;
+        try {
+            ns = parser.parseArgs(args);
+        } catch (ArgumentParserException e) {
+            logger.error("Couldn't parse input: {}", e.getMessage());
+            System.exit(1);
+        }
+        return ns;
+    }
+
+    private void addServerSubparser(Subparsers subparsers) {
+        ArgumentParser serverParser = subparsers.addParser("server")
+                .help("Run the pkspkms server");
+        serverParser.addArgument("--port")
+                .type(Integer.class)
+                .setDefault(3000)
+                .help("Port number for the server");
+        serverParser.addArgument("--directory")
+                .type(String.class)
+                .required(true)
+                .help("Directory to serve");
+    }
+
+    private void addExportSubparser(Subparsers subparsers) {
+        ArgumentParser exportParser = subparsers.addParser("export")
+                .help("Export PKSPKMS data");
+        exportParser.addArgument("--directory")
+                .type(String.class)
+                .required(true)
+                .help("Source directory");
+        exportParser.addArgument("--query")
+                .type(String.class)
+//                .required(true)
+                .setDefault("")
+                .help("Query string for export");
+        exportParser.addArgument("--output")
+                .type(String.class)
+                .required(true)
+                .help("Output file path");
+        exportParser.addArgument("--type")
+                .type(String.class)
+                .choices("markdown", "copy")
+                .required(true)
+                .help("Type of export (markdown or graph)");
+        exportParser.addArgument("--sqlite-db")
+                .type(String.class)
+                .help("Path to SQLite database");
+        exportParser.addArgument("--options")
+                .type(String.class)
+                .help("Comma-separated options (e.g. \"copyLinkedFiles,other\" )");
+        exportParser.addArgument("--depth")
+                .type(Integer.class)
+                .help("Depth for graph export.");
+        exportParser.addArgument("--dry-run")
+                .type(Boolean.class)
+                .setDefault(Boolean.FALSE)
+                .action(Arguments.storeTrue())
+                .help("Don't write any changes to disk.");
+        exportParser.addArgument("--load")
+                .action(Arguments.storeTrue())
+                .help("Load data from previously saved (serialised) files instead of regenerating.");
+    }
+}
