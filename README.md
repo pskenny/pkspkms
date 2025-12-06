@@ -96,6 +96,41 @@ Returns:
 }
 ```
 
+You can query it, such as `curl GET "http://localhost:23467/files/list?tags=PKSPKMS" | jq .` returns:
+
+```json
+{
+  "resultSize": 2,
+  "files": [
+    {
+      "title": "README",
+      "tags": [
+        "PKSPKMS",
+        "Development",
+        "Documentation"
+      ],
+      "filePath": "/README.md"
+    },
+    {
+      "shouldBeANumber": 42,
+      "filePath": "/Notes/PKSPKMS.md",
+      "links": [
+        "./Notes/Resolved Wikilink.md",
+        "../Resources/Neumann.jpg"
+      ],
+      "title": "Different title than file name",
+      "anotherYamlProperty": "test data",
+      "content": "---\ntitle: Different title than file name\ntags:\n  - Meta\n  - PKSPKMS\n  - Tag\nanotherYamlProperty: \"test data\"\nshouldBeANumber: 42\n---\n\n## Links\n\n- [[Unresolved Wikilink]]\n- [Resolved Wikilink](./Notes/Resolved Wikilink.md)\n- [[Resolved Wikilink Defined By YAML Frontmatter title]]\n- [Resolved Wikilink Defined By YAML Frontmatter alias](./Notes/Resolved Wikilink.md)\n- [regular link](https://www.example.com)\n\n## Unordered List\n\n- First item\n- Second item\n- Third item\n\n## Ordered list\n\n1. First item\n2. Second item\n3. Third item\n\n## Code \n\n`code`\n\n```\nmore code\n```\n\n## Horizontal Rule \t\n\n---\n\n## Image\n\n![Relative image link](../Resources/Neumann.jpg)\n",                                                                                                                                                                
+      "tags": [
+        "Meta",
+        "PKSPKMS",
+        "Tag"
+      ]
+    }
+  ]
+}
+```
+
 ## Known Issues
 
 - Lots
