@@ -5,28 +5,43 @@
 A program that provides a single user API and command-line export tool for a zettlekasten style 
 personal knowledge management directory.
 
-## Running
+## Build And Run
 
-Make sure you have Maven and JDK 17 installed and running correctly.
+Make sure you have Maven and JDK 17 installed and running correctly. The following commands use the example directory in this repo (`test/data/example`), you can try it out on your own data by replacing that value with your own directory. For reference:
+
+```text
+test/data/example
+├── Example.md
+├── Notes
+│   ├── Backlink-for-Resolved-Wikilink.md
+│   ├── PKSPKMS.md
+│   ├── Resolved Wikilink.md
+│   └── Tasks
+│       └── Task.md
+├── README.md
+└── Resources
+    └── Neumann.jpg
+```
 
 ```shell
+# First, build pkspkms
 git clone git@github.com:pskenny/pkspkms.git ~/pkspkms
 cd pkspkms
 mvn clean package
 ```
 
-### Export
+Try out exporting:
 
 ```shell
 mkdir temp-dir
-# Export test directory Markdown files and linked files
+# Run export using test directory
 java -jar target/pkspkms-0.1.0-ALPHA.jar export --directory test/data/example --query "" --output temp-dir --type "markdown"
 ```
 
-### Server
+Try out the server:
 
 ```shell
-# copy command to start server at port 3000 using test directory
+# Start server at port 23467 using test directory
 java -jar target/pkspkms-0.1.0-ALPHA.jar server --directory test/data/example --port 23467
 # In another terminal 
 curl GET "http://localhost:23467/files/list" | jq .
@@ -96,23 +111,7 @@ Returns:
 }
 ```
 
-For reference:
-
-```text
-test/data/example
-├── Example.md
-├── Notes
-│   ├── Backlink-for-Resolved-Wikilink.md
-│   ├── PKSPKMS.md
-│   ├── Resolved Wikilink.md
-│   └── Tasks
-│       └── Task.md
-├── README.md
-└── Resources
-    └── Neumann.jpg
-```
-
-You can query it, such as `curl GET "http://localhost:23467/files/list?tags=PKSPKMS" | jq .` returns:
+You can also query it, such as `curl GET "http://localhost:23467/files/list?tags=PKSPKMS" | jq .` returns:
 
 ```json
 {
@@ -145,6 +144,12 @@ You can query it, such as `curl GET "http://localhost:23467/files/list?tags=PKSP
     }
   ]
 }
+```
+
+### Testing
+
+```shell
+mvn clean test
 ```
 
 ## Known Issues
