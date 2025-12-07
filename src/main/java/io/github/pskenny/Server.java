@@ -47,8 +47,6 @@ public class Server {
             Set<String> linkedFiles = new HashSet<>();
             Set<String> linkedTags = new HashSet<>();
 
-            // bad
-
             matchedFiles.values().forEach(pksFile -> {
                 if (pksFile.getProperties().containsKey("links")) {
                     linkedFiles.addAll((Collection<? extends String>) pksFile.getProperties().get("links"));

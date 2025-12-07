@@ -1,7 +1,5 @@
-package io.github.pskenny.search;
+package io.github.pskenny.io;
 
-import io.github.pskenny.io.PksFile;
-import io.github.pskenny.io.Search;
 import junit.framework.Test;
 import junit.framework.TestCase;
 import junit.framework.TestSuite;

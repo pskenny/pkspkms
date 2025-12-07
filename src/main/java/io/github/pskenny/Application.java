@@ -29,14 +29,20 @@ public class Application {
                         .start(port);
                 break;
             case "export":
-                String dir = ns.getString("directory");
-                String query = ns.getString("query");
-                String type = ns.getString("type");
-                String output = ns.getString("output");
-//                boolean dryRun = ns.getBoolean("dry-run");
+                Export.ExportConfig exportConfig = new Export.ExportConfig(
+                        ns.getString("directory"),
+                        ns.getString("query"),
+                        ns.getString("output"),
+                        ns.getString("type"),
+                        ns.getString("sqlite-db"),
+                        ns.getString("options"),
+                        ns.getInt("depth"),
+                        ns.getBoolean("dryRun"),
+                        ns.getBoolean("load")
+                    );
 
-                new Export(dir, false)
-                        .export(query, type, output);
+                new Export(exportConfig)
+                        .export();
                 break;
             default:
                 logger.error("Unknown command: {}", command);
@@ -84,7 +90,6 @@ public class Application {
                 .help("Source directory");
         exportParser.addArgument("--query")
                 .type(String.class)
-//                .required(true)
                 .setDefault("")
                 .help("Query string for export");
         exportParser.addArgument("--output")
@@ -104,6 +109,7 @@ public class Application {
                 .help("Comma-separated options (e.g. \"copyLinkedFiles,other\" )");
         exportParser.addArgument("--depth")
                 .type(Integer.class)
+                .setDefault(1)
                 .help("Depth for graph export.");
         exportParser.addArgument("--dry-run")
                 .type(Boolean.class)
@@ -112,6 +118,7 @@ public class Application {
                 .help("Don't write any changes to disk.");
         exportParser.addArgument("--load")
                 .action(Arguments.storeTrue())
+                .setDefault(Boolean.FALSE)
                 .help("Load data from previously saved (serialised) files instead of regenerating.");
     }
 }

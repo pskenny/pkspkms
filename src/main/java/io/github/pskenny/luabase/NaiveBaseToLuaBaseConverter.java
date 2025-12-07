@@ -9,9 +9,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/*
- Naively converts Obsidian Base text to LuaBase
- */
+// Naively converts Obsidian Base text to LuaBase
 public class NaiveBaseToLuaBaseConverter {
     private static final Logger logger = LoggerFactory.getLogger(NaiveBaseToLuaBaseConverter.class);
     public static final String FILE_NAME = "file.name";

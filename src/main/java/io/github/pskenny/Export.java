@@ -13,17 +13,15 @@ public class Export {
     private static final Logger logger = LoggerFactory.getLogger(Export.class);
 
     private final InMemoryFileRepository inMemoryFileRepository;
-    private final String directory;
-    private final boolean dryRun;
+    private final ExportConfig config;
 
-    public Export(String directory, boolean dryRun) {
-        this.directory = directory;
-        this.dryRun = dryRun;
-        this.inMemoryFileRepository = new InMemoryFileRepository(directory);
+    public Export(ExportConfig config) {
+        this.config = config;
+        this.inMemoryFileRepository = new InMemoryFileRepository(config.directory());
     }
 
-    public void export(String query, String type, String output) {
-        Map<String, PksFile> matchedFiles = inMemoryFileRepository.search(query);
+    public void export() {
+        Map<String, PksFile> matchedFiles = inMemoryFileRepository.search(config.query());
         if (matchedFiles.isEmpty()) {
             System.out.println("No files to export");
             return;
@@ -31,12 +29,12 @@ public class Export {
             System.out.println("Matched " + matchedFiles.size() + " files");
         }
 
-        switch (type) {
+        switch (config.type()) {
             case "markdown":
-                markdownExport(matchedFiles, directory, output, dryRun);
+                markdownExport(matchedFiles, config.directory(), config.output(), config.dryRun());
                 break;
             case "copy":
-                copyExport(matchedFiles, directory, output, dryRun);
+                copyExport(matchedFiles, config.directory(), config.output(), config.dryRun());
                 break;
             default:
                 System.err.println("No export type specified");
@@ -57,4 +55,6 @@ public class Export {
             copyFile(file.getFilePath(), pkms, outputDirectory, dryRun);
         });
     }
+
+    public record ExportConfig(String directory, String query, String output, String type, String sqliteDb, String options, int depth, boolean dryRun, boolean load){}
 }

@@ -96,6 +96,22 @@ Returns:
 }
 ```
 
+For reference:
+
+```text
+test/data/example
+├── Example.md
+├── Notes
+│   ├── Backlink-for-Resolved-Wikilink.md
+│   ├── PKSPKMS.md
+│   ├── Resolved Wikilink.md
+│   └── Tasks
+│       └── Task.md
+├── README.md
+└── Resources
+    └── Neumann.jpg
+```
+
 You can query it, such as `curl GET "http://localhost:23467/files/list?tags=PKSPKMS" | jq .` returns:
 
 ```json
