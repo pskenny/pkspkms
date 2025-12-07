@@ -24,7 +24,7 @@ public class PksFile implements java.io.Serializable {
         this.properties = properties;
         this.file = file;
         try {
-            int substringStart = file.getCanonicalPath().indexOf(directory) + directory.length();
+            int substringStart = file.getCanonicalPath().indexOf(directory) + directory.length() + 1;
             filePath = file.getCanonicalPath().substring(substringStart);
         } catch (IOException e) {
             throw new RuntimeException(e);

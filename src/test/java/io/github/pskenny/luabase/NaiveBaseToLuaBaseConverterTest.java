@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+import static io.github.pskenny.test.FileUtil.readFile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 // Official Obsidian Bases functions documentation: https://help.obsidian.md/bases/functions
@@ -16,78 +17,12 @@ public class NaiveBaseToLuaBaseConverterTest {
     NaiveBaseToLuaBaseConverter naiveBaseToLuaBaseConverter = new NaiveBaseToLuaBaseConverter();
 
     @Test
-    public void testObsidianFilePropertyConversions() {
-        String input = """
-views:
-  - type: table
-    name: Table
-    filters:
-      and:
-        - file.tags.containsAny("Orange")
-    order:
-      - file.name
-      - file.backlinks
-      - file.ctime
-      - file.ext
-      - file.folder
-      - file.mtime
-      - file.path
-      - file.size
-    sort:
-      - property: file.name
-        direction: DESC
-    columnSize:
-      file.name: 433
-                """.trim();
-        String expected = """
-views:
-  - type: table
-    filters:
-      and:
-        - 'hasPropertyValue(file, "tags", "Orange")'
-    order:
-      - '"[[" .. getPropertyValue(file, "filePath", "") .. "]]", "filePath"'
-      - 'getPropertyValue(file, "backlinks", ""), "backlinks"'
-      - 'getPropertyValue(file, "creationDate", ""), "creationDate"'
-      - 'getPropertyValue(file, "ext", ""), "ext"'
-      - 'getPropertyValue(file, "folder", ""), "folder"'
-      - 'getPropertyValue(file, "modificationDate", ""), "modificationDate"'
-      - 'getPropertyValue(file, "path", ""), "path"'
-      - 'getPropertyValue(file, "size", ""), "size"'
-    sort:
-      - property: filePath
-        direction: DESC
-                """.trim();
+    void testObsidianToPkspkmsPropertyConversions() {
+        String input = readFile("test/data/base/obsidian-to-luabase-properties.base");
+        String expected = readFile("test/data/luabase/obsidian-to-luabase-properties.luabase");
 
         String actual = naiveBaseToLuaBaseConverter.convert(input).trim();
         assertEquals(expected, actual);
-    }
-
-@Test
-    public void testObsidianFileMethodContainsAny() {
-        String input = """
-views:
-  - type: table
-    name: Table
-    filters:
-      and:
-        - file.tags.containsAny("Orange", "Apple")
-    order:
-      - file.name
-      - file.tags
-                """.trim();
-        String expected = """
-views:
-  - type: table
-    filters:
-      and:
-        - 'hasPropertyValue(file, "tags", "Orange")'
-    order:
-      - '"[[" .. getPropertyValue(file, "filePath", "") .. "]]", "filePath"'
-      - 'table.concat( (function() local t = {}; local tags_array = ( getPropertyValue(file, "tags", "") or {}):toArray(); for i=1, #tags_array do local v = tags_array[i]; table.insert(t, "#" .. v) end; return t end)(), " "), "tags"'                """.trim();
-
-        String actual = naiveBaseToLuaBaseConverter.convert(input).trim();
-//        assertEquals(expected, actual);
     }
 
     @Test

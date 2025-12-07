@@ -3,6 +3,7 @@ package io.github.pskenny.test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -46,5 +47,14 @@ public class FileUtil {
 
         Path filePath = testDirectory.resolve(fileName);
         Files.writeString(filePath, contentBuilder.toString());
+    }
+
+    public static String readFile(String relativePath) {
+        try {
+            Path path = Paths.get(System.getProperty("user.dir"), relativePath);
+            return Files.readString(path);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read test data file: " + relativePath, e);
+        }
     }
 }

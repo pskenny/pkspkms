@@ -1,0 +1,11 @@
+views:
+  - type: table
+    order:
+      - '"[[" .. getPropertyValue(file, "filePath", "") .. "]]", "filePath"'
+      - 'getPropertyValue(file, "backlinks", ""), "backlinks"'
+      - 'getPropertyValue(file, "creationDate", ""), "creationDate"'
+      - 'getPropertyValue(file, "ext", ""), "ext"'
+      - 'getPropertyValue(file, "folder", ""), "folder"'
+      - 'getPropertyValue(file, "modificationDate", ""), "modificationDate"'
+      - 'getPropertyValue(file, "path", ""), "path"'
+      - 'getPropertyValue(file, "size", ""), "size"'

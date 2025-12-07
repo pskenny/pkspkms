@@ -93,7 +93,7 @@ public class SQLitePksFileRepositoryTest {
     }
 
     @Test
-    public void testUpdateNonExistentFileThrowsException() throws SQLException {
+    public void testUpdateNonExistentFileThrowsException() {
         Map<String, Object> properties = new HashMap<>();
         PksFile file = new PksFile("nonexistent.pks", properties);
         assertThrows(SQLException.class, () -> {

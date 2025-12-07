@@ -2,7 +2,6 @@ package io.github.pskenny;
 
 import io.github.pskenny.io.JsonUtil;
 import io.github.pskenny.io.PksFile;
-import io.github.pskenny.io.parser.GenericParser;
 import io.github.pskenny.repo.InMemoryFileRepository;
 import io.javalin.Javalin;
 import io.javalin.plugin.bundled.CorsPluginConfig;
@@ -17,6 +16,7 @@ public class Server {
         inMemoryFileRepository = new InMemoryFileRepository(directory);
         app = Javalin.create(config -> {
 //            config.bundledPlugins.enableDevLogging();
+            config.showJavalinBanner = false;
             config.bundledPlugins.enableCors(cors -> {
                 cors.addRule(CorsPluginConfig.CorsRule::anyHost);
             });
@@ -26,6 +26,7 @@ public class Server {
 
         app.get("/files/list", ctx -> {
             Map<String, PksFile> matchedFiles = inMemoryFileRepository.search(ctx.queryParamMap());
+            matchedFiles.values().forEach(pksFile -> pksFile.filterProperties(List.of(), List.of("content")));
             ctx.json(JsonUtil.pksFilesToJson(matchedFiles.values()));
             ctx.status(200);
         });

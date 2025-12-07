@@ -8,11 +8,11 @@ management directory.
 ## Build And Run
 
 Make sure you have Maven and JDK 17 installed and running correctly. The following commands use the example directory 
-in this repo (`test/data/example`), you can try it out on your own data by replacing that value with your own directory. 
+in this repo (`test/data/pkms-examples/example`), you can try it out on your own data by replacing that value with your own directory. 
 For reference:
 
 ```text
-test/data/example
+test/data/pkms-examples/example
 ├── Example.md
 ├── Notes
 │   ├── Backlink-for-Resolved-Wikilink.md
@@ -37,14 +37,14 @@ Try out exporting:
 ```shell
 mkdir temp-dir
 # Run export using test directory
-java -jar target/pkspkms-0.1.0-ALPHA.jar export --directory test/data/example --query "" --output temp-dir --type "markdown"
+java -jar target/pkspkms-0.1.0-ALPHA.jar export --directory test/data/pkms-examples/example --query "" --output temp-dir --type "markdown"
 ```
 
 Try out the server:
 
 ```shell
 # Start server at port 23467 using test directory
-java -jar target/pkspkms-0.1.0-ALPHA.jar server --directory test/data/example --port 23467
+java -jar target/pkspkms-0.1.0-ALPHA.jar server --directory test/data/pkms-examples/example --port 23467
 # In another terminal 
 curl GET "http://localhost:23467/files/list" | jq .
 ```

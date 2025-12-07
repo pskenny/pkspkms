@@ -1,11 +1,11 @@
 {
   "resultSize" : 2,
   "files" : [ {
-    "tags" : "test",
-    "filePath" : "/test2.md"
-  }, {
     "links" : [ "test2.svg", "test1.md" ],
     "tags" : "test",
-    "filePath" : "/test.md"
+    "filePath" : "test.md"
+  }, {
+    "tags" : "test",
+    "filePath" : "test2.md"
   } ]
 }

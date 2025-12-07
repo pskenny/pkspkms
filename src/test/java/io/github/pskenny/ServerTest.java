@@ -17,8 +17,8 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 import static io.github.pskenny.test.FileUtil.createFile;
+import static io.github.pskenny.test.FileUtil.readFile;
 import static io.github.pskenny.test.JsonUtil.assertJsonEquals;
-import static io.github.pskenny.test.JsonUtil.readJsonFile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -101,7 +101,7 @@ public class ServerTest {
         assertEquals(200, response.statusCode(), "The /files/list endpoint should return HTTP 200 OK.");
 
         String actual = response.body();
-        String expectedJson = readJsonFile("test/data/response/files-list.json");
+        String expectedJson = readFile("test/data/response/files-list.json");
         assertJsonEquals(expectedJson, actual, true);
 
         stopServer();
@@ -151,7 +151,7 @@ No links
         assertEquals(200, response.statusCode(), "The /files/list/graph endpoint should return HTTP 200 OK.");
 
         String actual = response.body();
-        String expectedJson = readJsonFile("test/data/response/files-list-graph.json");
+        String expectedJson = readFile("test/data/response/files-list-graph.json");
         assertJsonEquals(expectedJson, actual, true);
         stopServer();
     }
@@ -210,7 +210,7 @@ No links
         assertEquals(200, response.statusCode(), "The /files/list/graph/depth/2 endpoint should return HTTP 200 OK.");
 
         String actual = response.body();
-        String expectedJson = readJsonFile("test/data/response/files-list-graph-depth-2.json");
+        String expectedJson = readFile("test/data/response/files-list-graph-depth-2.json");
         assertJsonEquals(expectedJson, actual, true);
         stopServer();
     }
