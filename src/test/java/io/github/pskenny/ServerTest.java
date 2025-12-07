@@ -155,4 +155,64 @@ No links
         assertJsonEquals(expectedJson, actual, true);
         stopServer();
     }
+
+
+    @Test
+    @DisplayName("GET /files/list/graph returns graph data")
+    void testFilesListGraphDepth2Endpoint() throws IOException, InterruptedException {
+        createFile(TEST_DIR, "test-graph.md", Map.of(),
+                """
+---
+tags:
+- Tag1
+---
+[test2](test2-graph.md)
+[test1 doesn't exist](test1-no-existy.md)
+                        """.trim()
+        );
+        createFile(TEST_DIR, "test2-graph.md", Map.of(),
+                """
+---
+tags:
+- Tag1
+- Tag2
+---
+[test3](test3-graph.md)
+                """.trim());
+
+        createFile(TEST_DIR, "test3-graph.md", Map.of(),
+                """
+---
+tags:
+- Tag3
+---
+[test4-graph](test4-graph.md)
+                """.trim());
+
+        createFile(TEST_DIR, "test4-graph.md", Map.of(),
+                """
+---
+tags:
+- Tag4
+---
+No links
+                """.trim());
+
+        startServer();
+
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/files/list/graph/depth/2?tags=Tag1"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, response.statusCode(), "The /files/list/graph/depth/2 endpoint should return HTTP 200 OK.");
+
+        String actual = response.body();
+        String expectedJson = readJsonFile("test/data/response/files-list-graph-depth-2.json");
+        assertJsonEquals(expectedJson, actual, true);
+        stopServer();
+    }
+
 }

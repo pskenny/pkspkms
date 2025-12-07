@@ -39,67 +39,56 @@ public class Server {
             ctx.status(200);
         });
 
-
         app.get("/files/list/graph/depth/2", ctx -> {
             Map<String, PksFile> matchedFiles = inMemoryFileRepository.search(ctx.queryParamMap());
-            Collection<PksFile> files = new ArrayList<>();
 
-            Set<String> linkedFiles = new HashSet<>();
-            Set<String> linkedTags = new HashSet<>();
+            Set<String> linkedFilePaths = new HashSet<>();
+            Set<String> allLinkedTags = new HashSet<>();
 
             matchedFiles.values().forEach(pksFile -> {
                 if (pksFile.getProperties().containsKey("links")) {
-                    linkedFiles.addAll((Collection<? extends String>) pksFile.getProperties().get("links"));
+                    linkedFilePaths.addAll((Collection<? extends String>) pksFile.getProperties().get("links"));
                 }
                 if (pksFile.getProperties().containsKey("backlinks")) {
-                    linkedFiles.addAll((Collection<? extends String>) pksFile.getProperties().get("backlinks"));
+                    linkedFilePaths.addAll((Collection<? extends String>) pksFile.getProperties().get("backlinks"));
                 }
                 if (pksFile.getProperties().containsKey("tags") && pksFile.getProperties().get("tags") != null) {
                     if (pksFile.getProperties().get("tags") instanceof String) {
-                        linkedFiles.add(pksFile.getProperties().get("tags").toString());
+                        allLinkedTags.add(pksFile.getProperties().get("tags").toString());
                     } else {
-                        linkedTags.addAll((Collection<? extends String>) pksFile.getProperties().get("tags"));
+                        allLinkedTags.addAll((Collection<? extends String>) pksFile.getProperties().get("tags"));
                     }
                 }
             });
 
-            linkedFiles.removeIf(matchedFiles::containsKey);
-            List<PksFile> depth2Files = getPksFilesByPath(linkedFiles);
+            // Remove any files already in the matched files
+            linkedFilePaths.removeIf((obj) ->
+                matchedFiles.containsKey(obj) || matchedFiles.containsKey("/" + obj)
+            );
+            Map<String, PksFile> depth1PksFiles = getPksFileMapByPath(linkedFilePaths);
 
-            depth2Files.forEach(pksFile -> {
-                if (pksFile.getProperties().containsKey("links")) {
-                    linkedFiles.addAll((Collection<? extends String>) pksFile.getProperties().get("links"));
-                }
-                if (pksFile.getProperties().containsKey("backlinks")) {
-                    linkedFiles.addAll((Collection<? extends String>) pksFile.getProperties().get("backlinks"));
-                }
+            depth1PksFiles.forEach((path, pksFile) -> {
                 if (pksFile.getProperties().containsKey("tags") && pksFile.getProperties().get("tags") != null) {
-                    linkedTags.addAll((Collection<? extends String>) pksFile.getProperties().get("tags"));
+                    allLinkedTags.addAll((Collection<? extends String>) pksFile.getProperties().get("tags"));
                 }
             });
 
-            if (!linkedTags.isEmpty()) {
+            Map<String, PksFile> taggedFiles = new HashMap<>();
+            if (!allLinkedTags.isEmpty()) {
                 // get every file with every tag
-                Map<String, PksFile> taggedFiles = new HashMap<>();
-                for (String tag : linkedTags) {
+                for (String tag : allLinkedTags) {
                     Map<String, PksFile> matchedTagFiles = inMemoryFileRepository.search("tags=" + tag);
                     taggedFiles.putAll(matchedTagFiles);
                 }
-
-                taggedFiles.forEach((s, pksFile) -> {
-                    if (!matchedFiles.containsKey(s)) {
-                        // has redundant files
-                        depth2Files.add(pksFile);
-                    }
-                });
             }
 
-            if (!depth2Files.isEmpty()) {
-                files.addAll(depth2Files);
-            }
+            Map<String, PksFile> allPksFiles = new HashMap<>();
+            allPksFiles.putAll(matchedFiles);
+            allPksFiles.putAll(depth1PksFiles);
+            allPksFiles.putAll(taggedFiles);
 
-            List<PksFile> filesToReturn = new ArrayList<>(matchedFiles.size());
-            files.forEach(pksFile -> {
+            Set<PksFile> filesToReturn = new HashSet<>();
+            allPksFiles.forEach((path, pksFile) -> {
                 // only have filePath, links, backlinks and tags properties
                 pksFile.filterProperties(List.of("links", "backlinks", "tags", "filePath"), List.of());
                 filesToReturn.add(pksFile);
@@ -110,26 +99,24 @@ public class Server {
         });
     }
 
+    private Map<String, PksFile> getPksFileMapByPath(Set<String> paths) {
+        Map<String, PksFile> files = new HashMap<>();
 
-    private List<PksFile> getPksFilesByPath(Set<String> paths) {
-        List<PksFile> files = new ArrayList<>();
-        GenericParser gp = new GenericParser();
-        var allPksFilesMap = inMemoryFileRepository.getAllPksFiles();
+        var allPksFiles = inMemoryFileRepository.getAllPksFiles();
+
         paths.forEach(path -> {
-            if (allPksFilesMap.containsKey(path)) {
-                files.add(allPksFilesMap.get(path));
+            if (allPksFiles.containsKey(path)) {
+                files.put(path, allPksFiles.get(path));
+            } else if (allPksFiles.containsKey("/" + path)) {
+                files.put("/" + path, allPksFiles.get("/" + path));
             }
         });
 
         return files;
     }
 
+    // for testing
     public Javalin getJavalinApp() {
         return app;
-    }
-
-    // for testing
-    public void stopServer() {
-        app.stop();
     }
 }
