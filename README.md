@@ -2,12 +2,14 @@
 
 **PK**'**S** **P**ersonal **K**nowledge **M**anagement **S**ystem
 
-A program that provides a single user API and command-line export tool for a zettlekasten style 
-personal knowledge management directory.
+A program that provides a single user HTTP API and command-line export tool for a Zettelkasten style personal knowledge 
+management directory.
 
 ## Build And Run
 
-Make sure you have Maven and JDK 17 installed and running correctly. The following commands use the example directory in this repo (`test/data/example`), you can try it out on your own data by replacing that value with your own directory. For reference:
+Make sure you have Maven and JDK 17 installed and running correctly. The following commands use the example directory 
+in this repo (`test/data/example`), you can try it out on your own data by replacing that value with your own directory. 
+For reference:
 
 ```text
 test/data/example
@@ -63,29 +65,19 @@ Returns:
       "filePath": "/README.md"
     },
     {
-      "tags": [
-        "Task"
-      ],
+      "tags": ["Task"],
       "filePath": "/Notes/Tasks/Task.md"
     },
     {
-      "aliases": [
-        "Resolved Wikilink Defined By YAML Frontmatter alias"
-      ],
+      "aliases": ["Resolved Wikilink Defined By YAML Frontmatter alias"],
       "title": "Resolved Wikilink Defined By YAML Frontmatter title",
-      "tags": [
-        "Example"
-      ],
+      "tags": ["Example"],
       "filePath": "/Notes/Resolved Wikilink.md"
     },
     {
-      "links": [
-        "Resources/Neumann.jpg"
-      ],
+      "links": ["Resources/Neumann.jpg"],
       "title": "Example Title",
-      "tags": [
-        "Example"
-      ],
+      "tags": ["Example"],
       "filePath": "/Example.md"
     },
     {
