@@ -37,7 +37,7 @@ public class Application {
                         ns.getString("sqlite-db"),
                         ns.getString("options"),
                         ns.getInt("depth"),
-                        ns.getBoolean("dryRun"),
+                        ns.getBoolean("dryrun"),
                         ns.getBoolean("load")
                     );
 
@@ -95,12 +95,12 @@ public class Application {
         exportParser.addArgument("--output")
                 .type(String.class)
                 .required(true)
-                .help("Output file path");
+                .help("Output directory path");
         exportParser.addArgument("--type")
                 .type(String.class)
                 .choices("markdown", "copy")
                 .required(true)
-                .help("Type of export (markdown or graph)");
+                .help("Type of export (markdown or copy)");
         exportParser.addArgument("--sqlite-db")
                 .type(String.class)
                 .help("Path to SQLite database");
@@ -111,10 +111,11 @@ public class Application {
                 .type(Integer.class)
                 .setDefault(1)
                 .help("Depth for graph export.");
-        exportParser.addArgument("--dry-run")
+        exportParser.addArgument("--dryrun")
                 .type(Boolean.class)
-                .setDefault(Boolean.FALSE)
+                .required(false)
                 .action(Arguments.storeTrue())
+                .setDefault(Boolean.FALSE)
                 .help("Don't write any changes to disk.");
         exportParser.addArgument("--load")
                 .action(Arguments.storeTrue())
