@@ -55,7 +55,11 @@ public class Server {
                     linkedFiles.addAll((Collection<? extends String>) pksFile.getProperties().get("backlinks"));
                 }
                 if (pksFile.getProperties().containsKey("tags") && pksFile.getProperties().get("tags") != null) {
-                    linkedTags.addAll((Collection<? extends String>) pksFile.getProperties().get("tags"));
+                    if (pksFile.getProperties().get("tags") instanceof String) {
+                        linkedFiles.add(pksFile.getProperties().get("tags").toString());
+                    } else {
+                        linkedTags.addAll((Collection<? extends String>) pksFile.getProperties().get("tags"));
+                    }
                 }
             });
 

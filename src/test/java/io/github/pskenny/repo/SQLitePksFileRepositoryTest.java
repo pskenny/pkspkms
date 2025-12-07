@@ -1,13 +1,7 @@
-package io.github.pskenny.repo.sqlite;
+package io.github.pskenny.repo;
 
 import io.github.pskenny.io.PksFile;
-import io.github.pskenny.repo.SQLitePksFileRepository;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.BeforeClass;
-import org.junit.AfterClass;
-import static org.junit.Assert.*;
+import org.junit.jupiter.api.*;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -20,13 +14,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 public class SQLitePksFileRepositoryTest {
 
     private static final String TEST_DB_PATH = "test.db";
     private static SQLitePksFileRepository repository;
     private static Path dbPath;
 
-    @BeforeClass
+    @BeforeAll
     public static void setupClass() throws IOException {
         dbPath = Path.of(TEST_DB_PATH);
         if (Files.exists(dbPath)) {
@@ -34,20 +30,20 @@ public class SQLitePksFileRepositoryTest {
         }
     }
 
-    @Before
+    @BeforeEach
     public void setup() {
         repository = new SQLitePksFileRepository(TEST_DB_PATH);
         repository.init();
     }
 
-    @After
+    @AfterEach
     public void teardown() throws SQLException {
         try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + TEST_DB_PATH)) {
             conn.createStatement().execute("DROP TABLE files");
         }
     }
 
-    @AfterClass
+    @AfterAll
     public static void teardownClass() throws IOException {
         Files.deleteIfExists(dbPath);
     }
@@ -96,11 +92,13 @@ public class SQLitePksFileRepositoryTest {
         assertEquals("newValue", foundFile.get().getProperties().get("key"));
     }
 
-    @Test(expected = SQLException.class)
+    @Test
     public void testUpdateNonExistentFileThrowsException() throws SQLException {
         Map<String, Object> properties = new HashMap<>();
         PksFile file = new PksFile("nonexistent.pks", properties);
-        repository.update(file);
+        assertThrows(SQLException.class, () -> {
+            repository.update(file);
+        });
     }
 
     @Test

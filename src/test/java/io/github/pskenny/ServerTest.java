@@ -110,20 +110,40 @@ public class ServerTest {
     @Test
     @DisplayName("GET /files/list/graph returns graph data")
     void testFilesListGraphEndpoint() throws IOException, InterruptedException {
-        createFile(TEST_DIR, "test-graph.md", Map.of(
-                        "tags", "test"),
+        createFile(TEST_DIR, "test-graph.md", Map.of(),
                 """
-                        [test2](test2-graph.md)
-                        [test1 doesn't exist](test1.md)
-                        """
+---
+tags:
+- Tag1
+---
+[test2](test2-graph.md)
+[test1 doesn't exist](test1-no-existy.md)
+                        """.trim()
         );
-        createFile(TEST_DIR, "test2-graph.md", Map.of("tags", "test"));
+        createFile(TEST_DIR, "test2-graph.md", Map.of(),
+                """
+---
+tags:
+- Tag1
+- Tag2
+---
+[test3](test3-graph.md)
+                """.trim());
+
+        createFile(TEST_DIR, "test3-graph.md", Map.of(),
+                """
+---
+tags:
+- Tag3
+---
+No links
+                """.trim());
 
         startServer();
 
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "/files/list/graph"))
+                .uri(URI.create(BASE_URL + "/files/list/graph?tags=Tag1"))
                 .GET()
                 .build();
 

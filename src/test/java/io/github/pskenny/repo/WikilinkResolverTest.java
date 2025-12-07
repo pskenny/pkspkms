@@ -1,12 +1,11 @@
-package io.github.pskenny.wikilink;
+package io.github.pskenny.repo;
 
 import io.github.pskenny.io.PksFile;
-import io.github.pskenny.repo.WikilinkResolver;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.*;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class WikilinkResolverTest {
     @Test

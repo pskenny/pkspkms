@@ -1,30 +1,21 @@
 package io.github.pskenny.luabase;
 
 import io.github.pskenny.io.PksFile;
-import junit.framework.Test;
-import junit.framework.TestCase;
-import junit.framework.TestSuite;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 // Official Obsidian Bases functions documentation: https://help.obsidian.md/bases/functions
-public class NaiveBaseToLuaBaseConverterTest extends TestCase {
+public class NaiveBaseToLuaBaseConverterTest {
 
     NaiveBaseToLuaBaseConverter naiveBaseToLuaBaseConverter = new NaiveBaseToLuaBaseConverter();
 
-    public NaiveBaseToLuaBaseConverterTest(String testName )
-    {
-        super( testName );
-    }
-
-    public static Test suite()
-    {
-        return new TestSuite( NaiveBaseToLuaBaseConverterTest.class );
-    }
-
+    @Test
     public void testObsidianFilePropertyConversions() {
         String input = """
 views:
@@ -72,7 +63,7 @@ views:
         assertEquals(expected, actual);
     }
 
-
+@Test
     public void testObsidianFileMethodContainsAny() {
         String input = """
 views:
@@ -99,6 +90,7 @@ views:
 //        assertEquals(expected, actual);
     }
 
+    @Test
     public void testObsidianFileTagsPropertyConvertsToTagLinks() {
         String input = """
 views:
@@ -124,6 +116,7 @@ views:
         assertEquals(expected, actual);
     }
 
+    @Test
     public void testFilterMatching() {
         String input = """
 views:
@@ -163,6 +156,7 @@ views:
         assertEquals(expected, actual);
     }
 
+    @Test
     public void testConvert() {
         String input = """
 views:
@@ -189,6 +183,7 @@ views:
         assertEquals(expected, actual);
     }
 
+    @Test
     public void testComplicatedEndToEndTable() {
         String input = """
 views:
@@ -235,12 +230,13 @@ views:
         String expectedTable = """
 | filePath | access |
 |---|---|
-| /notes/another_book_note.md | Public |
-| /notes/a_project_done.md | Public |
+| [[/notes/another_book_note.md]] | Public |
+| [[/notes/a_project_done.md]] | Public |
 """;
         assertEquals(expectedTable, actualTable);
     }
 
+    @Test
     public void testObsidianBaseToLuaBaseToTable() {
         String input = """
 views:

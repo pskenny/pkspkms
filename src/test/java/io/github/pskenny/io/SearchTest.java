@@ -1,8 +1,6 @@
 package io.github.pskenny.io;
 
-import junit.framework.Test;
-import junit.framework.TestCase;
-import junit.framework.TestSuite;
+import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.List;
@@ -11,33 +9,33 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-// inclusions follow AND (INNER JOIN) and exclusions follow OR?
-public class SearchTest extends TestCase {
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+// inclusions follow AND (INNER JOIN) and exclusions follow OR
+public class SearchTest {
     public final String FILE_PROPERTY_TAGS_INCLUSION = "tags";
     public final String FILE_PROPERTY_TAGS_EXCLUSION = "!tags";
 
-    public SearchTest(String testName) {
-        super(testName);
-    }
-
-    public static Test suite() {
-        return new TestSuite(SearchTest.class);
-    }
-
+    @Test
     public void testApp() {
-        PksFile file = getFile();
+        Map<String, Object> properties = new HashMap<>();
+        List<String> tags = List.of("tag1", "tag2");
+        properties.put(FILE_PROPERTY_TAGS_INCLUSION, tags);
+        PksFile file = getFile("filePath", properties);
+
         Map<String, List<String>> params = getParameters();
         Set<PksFile> results = Stream.of(file)
                 .filter(pksFile -> Search.matchesProperties(pksFile, params))
                 .collect(Collectors.toSet());
 
-        assert (results.size() == 1);
+        assertEquals(1, results.size());
     }
 
+    @Test
     public void testInclusionFilteringMany() {
-        PksFile file1 = getFile(getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag2"));
-        PksFile file2 = getFile(getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag3", "tag4"));
-        PksFile file3 = getFile(getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag3"));
+        PksFile file1 = getFile("filePath", getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag2"));
+        PksFile file2 = getFile("filePath", getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag3", "tag4"));
+        PksFile file3 = getFile("filePath", getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag3"));
 
         Map<String, List<String>> params = getParameters(FILE_PROPERTY_TAGS_INCLUSION, "tag1");
 
@@ -45,14 +43,17 @@ public class SearchTest extends TestCase {
                 .filter(pksFile -> Search.matchesProperties(pksFile, params))
                 .collect(Collectors.toSet());
 
-        assert (results.size() == 2);
+        int expected = 2;
+        int actual = results.size();
+        assertEquals(expected, actual);
     }
 
+    @Test
     public void testExclusionManyFilteringMany() {
-        PksFile file1 = getFile(getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag2"));
-        PksFile file2 = getFile(getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag3", "tag4"));
-        PksFile file3 = getFile(getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag3"));
-        PksFile file4 = getFile(getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag5", "tag6"));
+        PksFile file1 = getFile("filePath", getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag2"));
+        PksFile file2 = getFile("filePath", getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag3", "tag4"));
+        PksFile file3 = getFile("filePath", getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag3"));
+        PksFile file4 = getFile("filePath", getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag5", "tag6"));
 
         Map<String, List<String>> params = getParameters("!tags", "tag1");
         params.put("!tags", List.of("tag5", "tag1"));
@@ -62,13 +63,14 @@ public class SearchTest extends TestCase {
                 .collect(Collectors.toSet());
 
         // should be file2 gets though
-        assert (results.size() == 1);
+        assertEquals(1, results.size());
     }
 
+    @Test
     public void testExclusionFilteringMany() {
-        PksFile file1 = getFile(getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag2"));
-        PksFile file2 = getFile(getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag3", "tag4"));
-        PksFile file3 = getFile(getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag3"));
+        PksFile file1 = getFile("filePath", getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag2"));
+        PksFile file2 = getFile("filePath", getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag3", "tag4"));
+        PksFile file3 = getFile("filePath", getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag3"));
 
         Map<String, List<String>> params = getParameters(FILE_PROPERTY_TAGS_EXCLUSION, "tag1");
 
@@ -76,35 +78,30 @@ public class SearchTest extends TestCase {
                 .filter(pksFile -> Search.matchesProperties(pksFile, params))
                 .collect(Collectors.toSet());
 
-        assert (results.size() == 1);
+        assertEquals(1, results.size());
     }
 
-
+    @Test
     public void testInclusionAndExclusionFilteringMany() {
         Map<String, Object> file1Properties = new HashMap<>();
-        file1Properties.put("filePath", List.of("11 Notes/file1.md"));
         file1Properties.put("tags", List.of("tag1", "tag2"));
-        PksFile file1 = getFile(file1Properties);
+        PksFile file1 = getFile("11 Notes/file1.md", file1Properties);
 
         Map<String, Object> file2Properties = new HashMap<>();
-        file2Properties.put("filePath", List.of("01 Notes/file2.md"));
         file2Properties.put("tags", List.of("tag3", "tag4"));
-        PksFile file2 = getFile(file2Properties);
+        PksFile file2 = getFile("01 Notes/file2.md", file2Properties);
 
         Map<String, Object> file3Properties = new HashMap<>();
-        file3Properties.put("filePath", List.of("01 Notes/file3.md"));
         file3Properties.put("tags", List.of("tag1", "tag3"));
-        PksFile file3 = getFile(file3Properties);
+        PksFile file3 = getFile("01 Notes/file3.md", file3Properties);
 
         Map<String, Object> file4Properties = new HashMap<>();
-        file4Properties.put("filePath", List.of("01 Notes/file4.md"));
         file4Properties.put("tags", List.of("tag2", "tag5"));
-        PksFile file4 = getFile(file4Properties);
+        PksFile file4 = getFile("01 Notes/file4.md", file4Properties);
 
         Map<String, Object> file5Properties = new HashMap<>();
-        file5Properties.put("filePath", List.of("01 Notes/file5.md"));
         file5Properties.put("tags", List.of("tag5", "tag1"));
-        PksFile file5 = getFile(file5Properties);
+        PksFile file5 = getFile("01 Notes/file5.md", file5Properties);
 
         Map<String, List<String>> searchParameters = getParameters("filePath", "0*");
         searchParameters.put("!tags", List.of("tag1", "tag5"));
@@ -113,13 +110,15 @@ public class SearchTest extends TestCase {
                 .filter(pksFile -> Search.matchesProperties(pksFile, searchParameters))
                 .collect(Collectors.toSet());
 
-        assert (results.size() == 1);
+        int expected = 1;
+        int actual = results.size();
+        assertEquals(expected, actual);
     }
 
-
+    @Test
     public void testHasOneProperty() {
-        PksFile file1 = getFile(getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag2"));
-        PksFile file2 = getFile(getProperties("other", "a", "b"));
+        PksFile file1 = getFile("filePath", getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag2"));
+        PksFile file2 = getFile("filePath", getProperties("other", "a", "b"));
 
         Map<String, List<String>> params = getParameters(FILE_PROPERTY_TAGS_INCLUSION, "");
 
@@ -127,16 +126,17 @@ public class SearchTest extends TestCase {
                 .filter(pksFile -> Search.matchesProperties(pksFile, params))
                 .collect(Collectors.toSet());
 
-        assert (results.size() == 1);
+        assertEquals(1, results.size());
     }
 
+    @Test
     public void testHasManyProperties() {
-        PksFile file1 = getFile(getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag2"));
+        PksFile file1 = getFile("filePath", getProperties(FILE_PROPERTY_TAGS_INCLUSION, "tag1", "tag2"));
         Map<String, Object> properties = new HashMap<>();
         properties.put("pkms", "123");
         properties.put(FILE_PROPERTY_TAGS_INCLUSION, List.of("abc"));
-        PksFile file2 = getFile(properties);
-        PksFile file3 = getFile(getProperties("other", "a", "b"));
+        PksFile file2 = getFile("filePath", properties);
+        PksFile file3 = getFile("filePath", getProperties("other", "a", "b"));
 
         Map<String, List<String>> params = getParameters(FILE_PROPERTY_TAGS_INCLUSION, "");
         params.put("pkms", List.of(""));
@@ -145,7 +145,7 @@ public class SearchTest extends TestCase {
                 .filter(pksFile -> Search.matchesProperties(pksFile, params))
                 .collect(Collectors.toSet());
 
-        assert (results.size() == 1);
+        assertEquals(1, results.size());
     }
 
     private Map<String, List<String>> getParameters() {
@@ -167,16 +167,7 @@ public class SearchTest extends TestCase {
         return properties;
     }
 
-    private PksFile getFile() {
-        Map<String, Object> properties = new HashMap<>();
-        List<String> tags = List.of("tag1", "tag2");
-        properties.put(FILE_PROPERTY_TAGS_INCLUSION, tags);
-
-        return getFile(properties);
-    }
-
-    private PksFile getFile(Map<String, Object> properties) {
-
-        return new PksFile("filePath", properties);
+    private PksFile getFile(String filePath, Map<String, Object> properties) {
+        return new PksFile(filePath, properties);
     }
 }

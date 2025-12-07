@@ -15,6 +15,13 @@ public class FileUtil {
 
     public static void createFile(Path testDirectory, String fileName, Map<String, Object> frontmatter, String content) throws IOException {
         StringBuilder contentBuilder = new StringBuilder();
+        if (frontmatter.isEmpty()) {
+            contentBuilder.append(content);
+
+            Path filePath = testDirectory.resolve(fileName);
+            Files.writeString(filePath, contentBuilder.toString());
+            return;
+        }
         contentBuilder.append("---\n");
 
         for (Map.Entry<String, Object> entry : frontmatter.entrySet()) {

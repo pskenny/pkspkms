@@ -1,14 +1,14 @@
 package io.github.pskenny.luabase;
 
 import io.github.pskenny.io.PksFile;
-import junit.framework.Test;
-import junit.framework.TestCase;
-import junit.framework.TestSuite;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /*
 More filters that don't work:
@@ -19,18 +19,8 @@ More filters that don't work:
 
 - what to do with cards?
  */
-public class LuaBaseProcessorTest  extends TestCase {
-
-    public LuaBaseProcessorTest(String testName )
-    {
-        super( testName );
-    }
-
-    public static Test suite()
-    {
-        return new TestSuite( LuaBaseProcessorTest.class );
-    }
-
+public class LuaBaseProcessorTest {
+    @Test
     public  void testProcess() {
         final String testLuaBaseYaml = """
         formulas:
@@ -92,6 +82,7 @@ public class LuaBaseProcessorTest  extends TestCase {
         assertEquals(table, expected);
     }
 
+    @Test
     public  void testTagsTransform() {
         final String testLuaBaseYaml = """
         formulas:
@@ -140,6 +131,7 @@ public class LuaBaseProcessorTest  extends TestCase {
         assertEquals(expected, actual);
     }
 
+    @Test
     public  void testSingleSort() {
         final String testLuaBaseYaml = """
         formulas:
