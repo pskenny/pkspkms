@@ -62,8 +62,7 @@ public class WikilinkResolver {
         if (potentialLinks.size() > 1) {
             logger.error("Ambiguous wikilink lookup: {}", text);
         }
-        return "." +
-                potentialLinks.toArray()[0].toString();
+        return potentialLinks.toArray()[0].toString();
     }
 
     // returns a map with the key being a valid wikilink (every file name and alias for a file) and the value being the file path
