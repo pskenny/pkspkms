@@ -3,7 +3,7 @@ package io.github.pskenny.io.parser.actions;
 import io.github.pskenny.io.PksFile;
 import io.github.pskenny.luabase.LuaBaseProcessor;
 import io.github.pskenny.luabase.NaiveBaseToLuaBaseConverter;
-import io.github.pskenny.luabase.YamlBaseParser;
+import io.github.pskenny.luabase.YamlParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,8 +22,9 @@ that as a trigger for when other files properties are updated to update that fil
  */
 public class BaseToMarkdownAction {
     private static final Logger logger = LoggerFactory.getLogger(BaseToMarkdownAction.class);
+    private final LuaBaseProcessor processor = new LuaBaseProcessor();
 
-    public Set<String> act(PksFile pksFile, HashMap<String, PksFile> allPksFiles) {
+    public Set<String> act(PksFile pksFile, Map<String, PksFile> allPksFiles) {
         if (!pksFile.getFilePath().endsWith(".md")) {
             return Set.of();
         }
@@ -53,11 +54,10 @@ public class BaseToMarkdownAction {
             try {
                 // this copy fucking sucks. So much data to copy. Makes bases really expensive
                 var copiedFiles = Map.copyOf(allPksFiles);
-                Map<String, Object> spec = new YamlBaseParser().parse(naiveBaseToLuaBaseConverter.convert(obsidianBaseYaml));
-                LuaBaseProcessor processor = new LuaBaseProcessor(spec);
+                Map<String, Object> spec = new YamlParser().parse(naiveBaseToLuaBaseConverter.convert(obsidianBaseYaml));
 
                 // Replace this match with the Lua table
-                replacement = processor.process(copiedFiles);
+                replacement = processor.process(spec, copiedFiles);
 
                 changedFiles.add(pksFile.getFilePath());
                 logger.debug("Converted Obsidian Base on " + pksFile.getFilePath());

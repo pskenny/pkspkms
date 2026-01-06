@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.Map;
 
 public class MarkdownParser {
@@ -24,21 +25,29 @@ public class MarkdownParser {
     }
 
     public PksFile initialParse(Path path, String directory) {
+        String content;
         try {
-            var content = Files.readString(path, Charset.defaultCharset());
-            // standard markdown only: frontmatter, md links. No transformations.
-            var frontmatter = yamlFrontmatterReader.getFrontMatterProperties(content);
-            PksFile pksFile = new PksFile(path.toFile(), directory, frontmatter);
-            // read the Markdown links in the file, add if any
-            var links = markdownLinkReader.getMarkdownLinksProperties(content);
-            if (links != null && !links.isEmpty()) {
-                var linksMap = Map.of("links", links);
-                pksFile.getProperties().putAll(linksMap);
-            }
-            return pksFile;
+            content = Files.readString(path, Charset.defaultCharset());
         } catch (IOException e) {
             logger.error("Couldn't read file: {}", path);
+            return null;
         }
-        return null;
+
+        // standard markdown only: frontmatter, md links. No transformations.
+        Map <String, Object> frontmatter = new HashMap<>();
+        try {
+            frontmatter = yamlFrontmatterReader.getFrontMatterProperties(content);
+        } catch (Exception ex) {
+            logger.error("Error reading YAML frontmatter for file " + path + ": " + ex.getMessage());
+        }
+
+        PksFile pksFile = new PksFile(path.toFile(), directory, frontmatter);
+        // read the Markdown links in the file, add if any
+        var links = markdownLinkReader.getMarkdownLinksProperties(content);
+        if (links != null && !links.isEmpty()) {
+            var linksMap = Map.of("links", links);
+            pksFile.getProperties().putAll(linksMap);
+        }
+        return pksFile;
     }
 }

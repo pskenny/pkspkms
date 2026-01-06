@@ -1,14 +1,17 @@
 package io.github.pskenny.io.parser.markdown;
+
 import org.junit.jupiter.api.Test;
+import org.yaml.snakeyaml.scanner.ScannerException;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class YamlFrontmatterReaderTest {
 
@@ -88,29 +91,46 @@ public class YamlFrontmatterReaderTest {
     void testInvalidYamlSyntax() {
         final String content = """
             ---
+            valid: value
             key-with-no-value
             another: pair
             ---
             Content below.
             """;
 
-        Map<String, Object> result = reader.getFrontMatterProperties(content);
-
-        assertTrue(result.isEmpty());
+        assertThrows(ScannerException.class, () -> {
+            reader.getFrontMatterProperties(content);
+        });
     }
 
     @Test
-    void testFileBasedFrontmatterReading() throws IOException {
+    void testInvalidYamlSyntaxSingleLineMultiVal() {
+        final String content = """
+            ---
+            valid: value
+            tags:
+              - markdown
+              - tutorial
+              - web
+            ---
+            Content below.
+            """;
+
+        Map<String, Object> result = reader.getFrontMatterProperties(content);
+        assertEquals(((ArrayList) result.get("tags")).size(),3 );
+    }
+
+    @Test
+    void testFrontmatter_fromFile() throws IOException {
         Path tempFilePath = null;
-        try {
-            final String fileContent = """
+        final String fileContent = """
                 ---
                 project: Java Efficiency
                 version: 1.0
                 ---
                 Actual source code documentation.
                 """;
-
+        try {
             tempFilePath = Files.createTempFile("test_yaml_file", ".md");
             Files.writeString(tempFilePath, fileContent, StandardCharsets.UTF_8);
 
@@ -119,7 +139,6 @@ public class YamlFrontmatterReaderTest {
 
             assertEquals(2, result.size());
             assertEquals("Java Efficiency", result.get("project"));
-
         } finally {
             if (tempFilePath != null) {
                 // In a proper JUnit test, Files.deleteIfExists(tempFilePath); would be used here.

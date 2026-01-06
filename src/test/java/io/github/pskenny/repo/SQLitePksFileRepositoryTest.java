@@ -59,11 +59,11 @@ public class SQLitePksFileRepositoryTest {
     public void testSaveAndFindByFileName() throws SQLException {
         Map<String, Object> properties = new HashMap<>();
         properties.put("key", "value");
-        PksFile file = new PksFile("testfile.pks", properties);
+        PksFile file = new PksFile("testfile.md", properties);
         repository.save(file);
-        Optional<PksFile> foundFile = repository.findByFileName("testfile.pks");
+        Optional<PksFile> foundFile = repository.findByFileName("testfile.md");
         assertTrue(foundFile.isPresent());
-        assertEquals("testfile.pks", foundFile.get().getFilePath());
+        assertEquals("testfile.md", foundFile.get().getFilePath());
         assertEquals("value", foundFile.get().getProperties().get("key"));
     }
 

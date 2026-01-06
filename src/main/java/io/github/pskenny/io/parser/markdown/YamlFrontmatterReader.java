@@ -1,5 +1,6 @@
 package io.github.pskenny.io.parser.markdown;
 
+import io.github.pskenny.luabase.YamlParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.Yaml;
@@ -28,7 +29,7 @@ public class YamlFrontmatterReader {
         try {
             String fileContent = Files.readString(inputFile.toPath(), StandardCharsets.UTF_8);
             return getFrontMatterProperties(fileContent);
-        } catch (IOException ex) {
+        } catch (Exception ex) {
             logger.error("Error reading file " + inputFile.getAbsolutePath() + ": " + ex.getMessage());
             return Collections.emptyMap();
         }
@@ -39,19 +40,15 @@ public class YamlFrontmatterReader {
             return Collections.emptyMap();
         }
 
-        try {
-            Matcher matcher = FRONTMATTER_PATTERN.matcher(fileContent);
+        Matcher matcher = FRONTMATTER_PATTERN.matcher(fileContent);
 
-            if (matcher.find() && matcher.start() == 0) {
-                String yamlBlock = matcher.group(1).trim();
-                if (yamlBlock.isEmpty()) {
-                    return Collections.emptyMap();
-                }
-
-                return new Yaml().load(yamlBlock);
+        if (matcher.find() && matcher.start() == 0) {
+            String yamlBlock = matcher.group(1).trim();
+            if (yamlBlock.isEmpty()) {
+                return Collections.emptyMap();
             }
-        } catch (Exception ex) {
-            logger.error("Error parsing YAML front matter: " + ex.getMessage());
+
+            return new YamlParser().parse(yamlBlock);
         }
 
         return Collections.emptyMap();

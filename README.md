@@ -54,50 +54,34 @@ Returns:
 ```json
 {
   "resultSize": 6,
-  "files": [
+  "files"     : [
     {
-      "title": "README",
-      "tags": [
-        "PKSPKMS",
-        "Development",
-        "Documentation"
-      ],
+      "title"   : "README",
+      "tags"    : ["PKSPKMS", "Development", "Documentation"],
       "filePath": "README.md"
     },
     {
-      "shouldBeANumber": 42,
-      "filePath": "Notes/PKSPKMS.md",
-      "links": [
-        "Notes/Resolved Wikilink.md",
-        "../Resources/Neumann.jpg"
-      ],
-      "title": "Different title than file name",
+      "shouldBeANumber"    : 42,
+      "filePath"           : "Notes/PKSPKMS.md",
+      "links"              : ["Notes/Resolved Wikilink.md", "../Resources/Neumann.jpg"],
+      "title"              : "Different title than file name",
       "anotherYamlProperty": "test data",
-      "tags": [
-        "Meta",
-        "PKSPKMS",
-        "Tag"
-      ]
+      "tags"               : ["Meta", "PKSPKMS", "Tag"]
     },
+    { "tags": ["Task"], "filePath": "Notes/Tasks/Task.md" },
     {
-      "tags": ["Task"],
-      "filePath": "Notes/Tasks/Task.md"
-    },
-    {
-      "aliases": ["Resolved Wikilink Defined By YAML Frontmatter alias"],
-      "title": "Resolved Wikilink Defined By YAML Frontmatter title",
-      "tags": ["Example"],
+      "aliases" : ["Resolved Wikilink Defined By YAML Frontmatter alias"],
+      "title"   : "Resolved Wikilink Defined By YAML Frontmatter title",
+      "tags"    : ["Example"],
       "filePath": "Notes/Resolved Wikilink.md"
     },
     {
-      "links": ["Resources/Neumann.jpg"],
-      "title": "Example Title",
-      "tags": ["Example"],
+      "links"   : ["Resources/Neumann.jpg"],
+      "title"   : "Example Title",
+      "tags"    : ["Example"],
       "filePath": "Example.md"
     },
-    {
-      "filePath": "Resources/Neumann.jpg"
-    }
+    {"filePath": "Resources/Neumann.jpg"}
   ]
 }
 ```
@@ -107,21 +91,14 @@ You can also query it, such as `curl GET "http://localhost:23467/files/list?tags
 ```json
 {
   "resultSize": 1,
-  "files": [
+  "files"     : [
     {
-      "shouldBeANumber": 42,
-      "filePath": "Notes/PKSPKMS.md",
-      "links": [
-        "Notes/Resolved Wikilink.md",
-        "../Resources/Neumann.jpg"
-      ],
-      "title": "Different title than file name",
+      "shouldBeANumber"    : 42,
+      "filePath"           : "Notes/PKSPKMS.md",
+      "links"              : ["Notes/Resolved Wikilink.md", "../Resources/Neumann.jpg"],
+      "title"              : "Different title than file name",
       "anotherYamlProperty": "test data",
-      "tags": [
-        "Meta",
-        "PKSPKMS",
-        "Tag"
-      ]
+      "tags"               : ["Meta", "PKSPKMS", "Tag"]
     }
   ]
 }
@@ -136,4 +113,3 @@ mvn clean test
 ## Known Issues
 
 - Lots
-- Doesn't support single line, comma separated YAML frontmatter properties (very relevant to tags)

@@ -129,7 +129,7 @@ public class NaiveBaseToLuaBaseConverter {
     }
 
     // Visible for testing
-    private String tryAndConvertExpression(String jsText) {
+    public String tryAndConvertExpression(String jsText) {
         if (jsText.isEmpty()) {
             return "";
         }

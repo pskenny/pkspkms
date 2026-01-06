@@ -19,9 +19,8 @@ public class NaiveBaseToLuaBaseConverterTest {
     @Test
     void testObsidianToPkspkmsPropertyConversions() {
         String input = readFile("test/data/base/obsidian-to-luabase-properties.base");
-        String expected = readFile("test/data/luabase/obsidian-to-luabase-properties.luabase");
-
         String actual = naiveBaseToLuaBaseConverter.convert(input).trim();
+        String expected = readFile("test/data/luabase/obsidian-to-luabase-properties.luabase");
         assertEquals(expected, actual);
     }
 
@@ -159,9 +158,9 @@ views:
             put("access", "Public");
         }}));
 
-        Map<String, Object> spec = new YamlBaseParser().parse(actual);
-        LuaBaseProcessor processor = new LuaBaseProcessor(spec);
-        var actualTable = processor.process(files);
+        Map<String, Object> spec = new YamlParser().parse(actual);
+        LuaBaseProcessor processor = new LuaBaseProcessor();
+        var actualTable = processor.process(spec, files);
         String expectedTable = """
 | filePath | access |
 |---|---|
@@ -209,14 +208,29 @@ views:
             put("status", "Active");
         }}));
 
-        Map<String, Object> spec = new YamlBaseParser().parse(actual);
-        LuaBaseProcessor processor = new LuaBaseProcessor(spec);
-        var actualTable = processor.process(files);
+        Map<String, Object> spec = new YamlParser().parse(actual);
+        LuaBaseProcessor processor = new LuaBaseProcessor();
+        var actualTable = processor.process(spec, files);
         String expectedTable = """
 | Path |
 |---|
 | /notes/a_project_done.md |
 """;
         assertEquals(actualTable, expectedTable);
+    }
+
+    @Test
+    void testExpressionConversions() {
+        NaiveBaseToLuaBaseConverter naiveBaseToLuaBaseConverter = new NaiveBaseToLuaBaseConverter();
+        Map<String, String> conversions = Map.of(
+                "", "",
+                "file.name", "filePath",
+                "file.tags", "tags",
+                "file.containsAny(\"something\")", "'hasPropertyValue(file, \"file\", \"something\")'"
+        );
+        for (Map.Entry<String, String> entry : conversions.entrySet()) {
+            assertEquals(entry.getValue(), naiveBaseToLuaBaseConverter.tryAndConvertExpression(entry.getKey()),
+                    "Failed conversion from " + entry.getValue() + " to " + entry.getValue());
+        }
     }
 }

@@ -18,42 +18,47 @@ public class WikilinkResolver {
                     File file = pksFile.getFile();
                     String fileName = file.getName();
 
-                    if (fileMap.containsKey(fileName)) {
-                        HashSet<String> newPaths = new HashSet<>(fileMap.get(fileName));
-                        newPaths.add(pksFile.getFilePath());
-
-                        fileMap.put(fileName, newPaths);
-                    } else {
-                        fileMap.put(fileName, Set.of(pksFile.getFilePath()));
-                    }
-
-                    if (pksFile.getProperties().containsKey("aliases")) {
-                        ArrayList<String> aliases = (ArrayList<String>) pksFile.getProperties().get("aliases");
-                        if (!Objects.isNull(aliases)) {
-                            for (String alias : aliases) {
-                                if (fileMap.containsKey(alias)) {
-                                    Set<String> filePaths = fileMap.get(alias);
-                                    HashSet<String> newPaths = new HashSet<>(filePaths);
-                                    newPaths.add(pksFile.getFilePath());
-
-                                    fileMap.put(alias, newPaths);
-                                } else {
-                                    fileMap.put(alias, Set.of(pksFile.getFilePath()));
-                                }
-                            }
-                        }
-                    }
+                    addToFileMap(fileMap, pksFile, fileName);
+                    addAliases(pksFile, fileMap);
                 }
         );
         resolvedLinks = fileMap;
     }
 
+    private void addToFileMap(Map<String, Set<String>> fileMap, PksFile pksFile, String name) {
+        if (fileMap.containsKey(name)) {
+            Set<String> filePaths = fileMap.get(name);
+            HashSet<String> newPaths = new HashSet<>(filePaths);
+            newPaths.add(pksFile.getFilePath());
+
+            fileMap.put(name, newPaths);
+        } else {
+            fileMap.put(name, Set.of(pksFile.getFilePath()));
+        }
+    }
+
+    private void addAliases(PksFile pksFile, Map<String, Set<String>> fileMap) {
+        if (pksFile.getProperties().containsKey("aliases")) {
+            ArrayList<String> aliases = (ArrayList<String>) pksFile.getProperties().get("aliases");
+            if (!Objects.isNull(aliases)) {
+                for (String alias : aliases) {
+                    addToFileMap(fileMap, pksFile, alias);
+                }
+            }
+        }
+    }
+
+    /**
+     * Returns null if there's no links already resolved found.
+     * @param text
+     * @return
+     */
     public String resolveWikilink(String text) {
         text = text.startsWith("/") ? text.substring(1) : text;
         Set<String> potentialLinks = resolvedLinks.get(text);
-        // check plain
+        // Check as is
         if (potentialLinks == null) {
-            // check if it's the file name without the file extension
+            // Check with Markdown file extension
             potentialLinks = resolvedLinks.get(text + ".md");
             if (potentialLinks == null) {
                 return null;
@@ -63,44 +68,5 @@ public class WikilinkResolver {
             logger.error("Ambiguous wikilink lookup: {}", text);
         }
         return potentialLinks.toArray()[0].toString();
-    }
-
-    // returns a map with the key being a valid wikilink (every file name and alias for a file) and the value being the file path
-    // if the value has more than one value the wikilink is ambiguous
-    public static Map<String, Set<String>> getWikilinkToFilePaths(Collection<PksFile> files) {
-        HashMap<String, Set<String>> fileMap = new HashMap<>();
-        files.forEach(pksFile -> {
-                    File file = new File(pksFile.getFilePath());
-                    String fileName = file.getName();
-
-                    if (fileMap.containsKey(fileName)) {
-                        HashSet<String> newPaths = new HashSet<>(fileMap.get(fileName));
-                        newPaths.add(pksFile.getFilePath());
-
-                        fileMap.put(fileName, newPaths);
-                    } else {
-                        fileMap.put(fileName, Set.of(pksFile.getFilePath()));
-                    }
-
-                    if (pksFile.getProperties().containsKey("aliases")) {
-                        ArrayList<String> aliases = (ArrayList<String>) pksFile.getProperties().get("aliases");
-                        if (!Objects.isNull(aliases)) {
-                            for (String alias : aliases) {
-                                if (fileMap.containsKey(alias)) {
-                                    Set<String> filePaths = fileMap.get(alias);
-                                    HashSet<String> newPaths = new HashSet<>(filePaths);
-                                    newPaths.add(pksFile.getFilePath());
-
-                                    fileMap.put(alias, newPaths);
-                                } else {
-                                    fileMap.put(alias, Set.of(pksFile.getFilePath()));
-                                }
-                            }
-                        }
-                    }
-                }
-        );
-
-        return fileMap;
     }
 }
