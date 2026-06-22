@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PKSPKMS</title>
+  <link rel="icon" type="image/png" href="/webui/brain-icon.png">
+  <style>
+    :root {
+      --bg: #f8f9fa; --fg: #1a1a2e; --card-bg: #ffffff; --card-border: #e1e4e8;
+      --accent: #4A90E2; --accent-hover: #357abd; --input-bg: #ffffff; --input-border: #d0d7de;
+      --muted: #6e7781; --pill-bg: #ddf4ff; --pill-fg: #0969da;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08); --spinner: #4A90E2;
+      --hl-field: #0969da; --hl-op: #cf222e; --hl-bool: #8250df;
+      --hl-str: #1a7f37; --hl-wild: #bf3989; --hl-paren: #6e7781; --hl-plain: #1a1a2e;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117; --fg: #c9d1d9; --card-bg: #161b22; --card-border: #30363d;
+        --accent: #58a6ff; --accent-hover: #79b8ff; --input-bg: #21262d; --input-border: #30363d;
+        --muted: #8b949e; --pill-bg: #388bfd22; --pill-fg: #58a6ff;
+        --shadow: 0 1px 3px rgba(0,0,0,0.3); --spinner: #58a6ff;
+        --hl-field: #58a6ff; --hl-op: #f85149; --hl-bool: #d2a8ff;
+        --hl-str: #7ee787; --hl-wild: #ff7b72; --hl-paren: #8b949e; --hl-plain: #c9d1d9;
+      }
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg); color: var(--fg); line-height: 1.6; min-height: 100vh;
+    }
+    .container { max-width: 800px; margin: 0 auto; padding: 2rem 1rem; }
+
+    header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 2rem; }
+    header img { width: 40px; height: 40px; }
+    header h1 { font-size: 1.5rem; font-weight: 600; }
+
+    .panel details {
+      border: 1px solid var(--card-border); border-radius: 8px;
+      padding: 0.75rem 1rem; margin-bottom: 1rem; background: var(--card-bg);
+    }
+    .panel summary {
+      font-weight: 600; font-size: 0.95rem; cursor: pointer; color: var(--fg); list-style: none;
+    }
+    .panel summary::-webkit-details-marker { display: none; }
+    .panel summary::before { content: "▸ "; color: var(--muted); }
+    .panel details[open] summary::before { content: "▾ "; }
+    .panel .body { margin-top: 0.75rem; font-size: 0.9rem; }
+    .panel .body p { margin-bottom: 0.6rem; }
+    .panel .body pre {
+      background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 6px;
+      padding: 0.6rem 0.8rem; font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.85rem;
+      overflow-x: auto; margin-bottom: 0.6rem;
+    }
+    .panel .body code {
+      font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.88em;
+      background: var(--input-bg); padding: 0.1rem 0.3rem; border-radius: 4px; border: 1px solid var(--input-border);
+    }
+    .panel .body ul { margin-left: 1.2rem; margin-bottom: 0.6rem; }
+
+    .editor-wrap { position: relative; margin-bottom: 0.5rem; }
+    .editor-wrap pre, .editor-wrap textarea {
+      font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.95rem; line-height: 1.5;
+      padding: 0.6rem 0.9rem; border: 1px solid var(--input-border); border-radius: 6px;
+      width: 100%; min-height: 2.7rem; white-space: pre; overflow: auto; word-wrap: normal; word-break: normal;
+    }
+    .editor-wrap pre { position: absolute; top: 0; left: 0; pointer-events: none; background: var(--input-bg); color: var(--hl-plain); z-index: 1; }
+    .editor-wrap textarea { position: relative; z-index: 2; background: transparent; color: transparent; caret-color: var(--fg); outline: none; resize: none; }
+    .editor-wrap textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent)22; }
+    .tok-field { color: var(--hl-field); } .tok-op { color: var(--hl-op); }
+    .tok-bool { color: var(--hl-bool); font-weight: 600; } .tok-str { color: var(--hl-str); }
+    .tok-wild { color: var(--hl-wild); font-weight: 600; } .tok-paren { color: var(--hl-paren); }
+
+    .btn-row { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+    .btn {
+      padding: 0.55rem 1.1rem; font-size: 0.95rem; font-weight: 500;
+      border: 1px solid transparent; border-radius: 6px; cursor: pointer; transition: all 0.15s;
+    }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: transparent; border-color: var(--input-border); color: var(--fg); }
+    .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .recent { margin-bottom: 1.25rem; }
+    .recent-label { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.35rem; }
+    .recent-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      padding: 0.25rem 0.5rem; border-radius: 6px; font-size: 0.82rem;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      background: var(--card-bg); border: 1px solid var(--card-border); color: var(--fg);
+      cursor: pointer; transition: border-color 0.1s; max-width: 100%; word-break: break-all;
+    }
+    .chip:hover { border-color: var(--accent); }
+    .chip .del { color: var(--muted); font-size: 0.9rem; line-height: 1; padding: 0 0.15rem; margin-left: 0.2rem; }
+    .chip .del:hover { color: #cf222e; }
+    @media (prefers-color-scheme: dark) { .chip .del:hover { color: #f85149; } }
+    .clear-link { font-size: 0.78rem; color: var(--muted); cursor: pointer; text-decoration: underline; margin-left: 0.5rem; }
+    .clear-link:hover { color: var(--accent); }
+
+    .status { margin-bottom: 1rem; font-size: 0.9rem; color: var(--muted); min-height: 1.4rem; }
+    .results { display: flex; flex-direction: column; gap: 0.75rem; }
+
+    .card {
+      background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px;
+      padding: 1rem; box-shadow: var(--shadow); transition: transform 0.1s;
+    }
+    .card:hover { transform: translateY(-1px); }
+    .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 0.5rem; }
+    .card-title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; width: 100%; }
+    .card-title {
+      font-weight: 600; font-size: 1.05rem; word-break: break-all; color: var(--fg); text-decoration: none;
+    }
+    .card-title:hover { text-decoration: underline; }
+    .card-type {
+      font-size: 0.72rem; padding: 0.15rem 0.4rem; border-radius: 4px;
+      background: var(--pill-bg); color: var(--pill-fg); font-weight: 600;
+      white-space: nowrap; text-transform: uppercase; letter-spacing: 0.02em; cursor: pointer;
+    }
+    .card-subtitle { font-size: 0.9rem; color: var(--muted); margin-top: 0.15rem; line-height: 1.3; }
+    .card-url { margin: 0.25rem 0; }
+    .card-link {
+      font-size: 0.82rem; color: var(--accent); text-decoration: none;
+      display: inline-flex; align-items: center; gap: 0.2rem; word-break: break-all;
+    }
+    .card-link:hover { text-decoration: underline; }
+    .card-path {
+      font-size: 0.85rem; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace;
+      margin-bottom: 0.5rem; text-decoration: none; display: inline-block;
+    }
+    .card-path:hover { text-decoration: underline; }
+    .card-desc {
+      font-size: 0.85rem; color: var(--fg); margin: 0.4rem 0; line-height: 1.45;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; opacity: 0.92;
+    }
+    .pills { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
+    .pill {
+      display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px;
+      font-size: 0.78rem; background: var(--pill-bg); color: var(--pill-fg); font-weight: 500; cursor: pointer;
+    }
+    .meta { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; font-size: 0.85rem; color: var(--muted); }
+
+    .copy-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 1.1rem; height: 1.1rem; margin-left: 0.4rem; cursor: pointer;
+      color: var(--muted); vertical-align: middle; opacity: 0.7; transition: opacity 0.1s;
+    }
+    .copy-icon:hover { opacity: 1; color: var(--accent); }
+    .field-label { font-size: 0.75rem; color: var(--muted); font-weight: 500; margin-right: 0.3rem; text-transform: capitalize; }
+
+    .load-more { text-align: center; padding: 0.75rem; }
+    .load-more .btn { min-width: 12rem; }
+
+    .empty, .error { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+    .error { color: #cf222e; }
+    @media (prefers-color-scheme: dark) { .error { color: #f85149; } }
+
+    .spinner {
+      display: inline-block; width: 1rem; height: 1rem;
+      border: 2px solid var(--spinner); border-top-color: transparent; border-radius: 50%;
+      animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 0.4rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .raw-toggle { margin-top: 1rem; text-align: right; }
+    .raw-toggle a { font-size: 0.8rem; color: var(--muted); cursor: pointer; text-decoration: underline; }
+    pre.raw {
+      background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px;
+      padding: 1rem; margin-top: 0.5rem; overflow-x: auto; font-size: 0.85rem; display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <img src="/webui/brain-icon.png" alt="PKSPKMS">
+      <h1>PKSPKMS</h1>
+    </header>
+
+    <div class="panel">
+      <details>
+        <summary>How does search work?</summary>
+        <div class="body">
+          <p>Search matches <strong>properties</strong> (YAML frontmatter + generated metadata like <code>links</code>, <code>backlinks</code>, <code>filePath</code>), not full text.</p>
+          <p>Use <code>and</code>, <code>or</code>, <code>not</code>, and parentheses to combine conditions.</p>
+          <p><strong>Fields:</strong> any YAML key (e.g. <code>tags</code>, <code>title</code>) plus built-ins <code>filePath</code>, <code>tags</code>, <code>links</code>, <code>backlinks</code>.</p>
+          <p><strong>Operators:</strong> <code>=</code> (or <code>:</code>), <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code>, <code>!=</code>. <code>*</code> is a wildcard.</p>
+          <pre>filePath = *.md
+tags = PKSPKMS
+(tags = PKSPKMS or tags = Development)
+(filePath = Notes/* and filePath = *.md)
+(links = * and not tags = Archive)
+title = *</pre>
+        </div>
+      </details>
+      <details id="settingsDetails">
+        <summary>Settings</summary>
+        <div class="body">
+          <p><strong>Vault path:</strong> <code id="vaultPathDisplay">loading...</code></p>
+        </div>
+      </details>
+    </div>
+
+    <div class="editor-wrap" id="editorWrap">
+      <pre id="highlightPre"></pre>
+      <textarea id="q" rows="1" placeholder="e.g. filePath = *.md" autocomplete="off" spellcheck="false"></textarea>
+    </div>
+
+    <div class="btn-row">
+      <button id="btn" class="btn btn-primary" onclick="search()">Search</button>
+      <button id="saveBtn" class="btn btn-secondary" onclick="saveQuery()" disabled>Save</button>
+    </div>
+
+    <div id="recentWrap" class="recent" style="display:none;">
+      <div class="recent-label">Recent <span class="clear-link" onclick="clearAllSaved()">Clear all</span></div>
+      <div id="recentChips" class="recent-chips"></div>
+    </div>
+
+    <div id="status" class="status"></div>
+    <div id="results" class="results"></div>
+
+    <div class="raw-toggle">
+      <a onclick="toggleRaw()">Toggle raw JSON</a>
+    </div>
+    <pre id="raw" class="raw"></pre>
+  </div>
+
+  <script>
+    const qInput = document.getElementById('q'), highlightPre = document.getElementById('highlightPre');
+    const btn = document.getElementById('btn'), saveBtn = document.getElementById('saveBtn');
+    const statusEl = document.getElementById('status'), resultsEl = document.getElementById('results'), rawEl = document.getElementById('raw');
+    const recentWrap = document.getElementById('recentWrap'), recentChips = document.getElementById('recentChips');
+
+    let lastJson = null, currentFiles = [], currentPage = 0, vaultPath = '';
+    const PAGE_SIZE = 100;
+    const STORAGE_KEY = 'pkspkms_queries';
+
+    // --- Config ---
+    (async function() {
+      try {
+        const res = await fetch('/config');
+        if (res.ok) {
+          const data = await res.json();
+          vaultPath = data.vaultPath || '';
+          const el = document.getElementById('vaultPathDisplay');
+          if (el) el.textContent = vaultPath || 'unknown';
+        }
+      } catch { /* ignore */ }
+    })();
+
+    // --- Syntax highlighting ---
+    function tokenize(query) {
+      const tokens = []; let i = 0;
+      while (i < query.length) {
+        const c = query[i];
+        if (/\s/.test(c)) { tokens.push({ type: 'PLAIN', text: c }); i++; continue; }
+        if (c === '"' || c === "'") {
+          const q = c; let j = i + 1;
+          while (j < query.length && query[j] !== q) j++;
+          tokens.push({ type: 'STR', text: query.slice(i, j + 1) }); i = j + 1; continue;
+        }
+        if (c === '(' || c === ')') { tokens.push({ type: 'PAREN', text: c }); i++; continue; }
+        if (c === '*') { tokens.push({ type: 'WILD', text: c }); i++; continue; }
+        const two = query.slice(i, i + 2);
+        if (two === '>=' || two === '<=' || two === '!=') { tokens.push({ type: 'OP', text: two }); i += 2; continue; }
+        if (c === '=' || c === ':' || c === '>' || c === '<') { tokens.push({ type: 'OP', text: c }); i++; continue; }
+        let j = i;
+        while (j < query.length && !/[\s()=:<>'"*]/.test(query[j])) j++;
+        const word = query.slice(i, j), u = word.toUpperCase();
+        if (u === 'AND' || u === 'OR' || u === 'NOT') tokens.push({ type: 'BOOL', text: word });
+        else if (u === 'LIKE') tokens.push({ type: 'OP', text: word });
+        else if (/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(word)) tokens.push({ type: 'FIELD', text: word });
+        else tokens.push({ type: 'PLAIN', text: word });
+        i = j;
+      }
+      return tokens;
+    }
+
+    function escapeHtml(text) {
+      return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function updateHighlight() {
+      const html = tokenize(qInput.value)
+        .map(t => `<span class="tok-${t.type.toLowerCase()}">${escapeHtml(t.text)}</span>`)
+        .join('');
+      highlightPre.innerHTML = html;
+      highlightPre.scrollLeft = qInput.scrollLeft;
+      highlightPre.scrollTop = qInput.scrollTop;
+      saveBtn.disabled = !qInput.value.trim();
+    }
+
+    qInput.addEventListener('input', updateHighlight);
+    qInput.addEventListener('scroll', () => { highlightPre.scrollLeft = qInput.scrollLeft; highlightPre.scrollTop = qInput.scrollTop; });
+    qInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); search(); } });
+
+    // --- Search ---
+    async function search() {
+      const query = qInput.value;
+      btn.disabled = true;
+      statusEl.innerHTML = '<span class="spinner"></span> Searching...';
+      resultsEl.innerHTML = ''; rawEl.textContent = ''; lastJson = null;
+      try {
+        const res = await fetch('/files/search?query=' + encodeURIComponent(query));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        lastJson = data; render(data);
+      } catch (e) {
+        statusEl.innerHTML = '';
+        resultsEl.innerHTML = '<div class="error">Error: ' + escapeHtml(e.message) + '</div>';
+      } finally { btn.disabled = false; }
+    }
+
+    function render(data) {
+      const size = data.resultSize || 0;
+      currentFiles = data.files || []; currentPage = 0;
+      statusEl.textContent = size + ' result' + (size === 1 ? '' : 's');
+      if (size === 0) { resultsEl.innerHTML = '<div class="empty">No files matched your query.</div>'; rawEl.textContent = ''; return; }
+      resultsEl.innerHTML = ''; rawEl.textContent = ''; renderBatch();
+    }
+
+    function renderBatch() {
+      const start = currentPage * PAGE_SIZE;
+      const end = Math.min(start + PAGE_SIZE, currentFiles.length);
+      const batch = currentFiles.slice(start, end);
+
+      let html = '';
+      for (const file of batch) html += buildCardHtml(file);
+
+      const existingBtn = document.getElementById('loadMoreBtn');
+      if (existingBtn) existingBtn.remove();
+
+      const temp = document.createElement('div');
+      temp.innerHTML = html;
+      while (temp.firstChild) resultsEl.appendChild(temp.firstChild);
+
+      if (end < currentFiles.length) {
+        const remaining = currentFiles.length - end;
+        const wrap = document.createElement('div');
+        wrap.className = 'load-more'; wrap.id = 'loadMoreBtn';
+        wrap.innerHTML = `<button class="btn btn-secondary" onclick="loadMore()">Load more (${remaining} remaining)</button>`;
+        resultsEl.appendChild(wrap);
+      }
+    }
+
+    function loadMore() { currentPage++; renderBatch(); }
+
+    // --- Card builder ---
+    function buildCardHtml(file) {
+      const title = file.title || file.filePath || 'Untitled';
+      const path = file.filePath || '';
+      const tags = Array.isArray(file.tags) ? file.tags : [];
+      const links = Array.isArray(file.links) ? file.links.length : 0;
+      const backlinks = Array.isArray(file.backlinks) ? file.backlinks.length : 0;
+      const { subtitle, url, price, description, type } = file;
+
+      const fileUrl = vaultPath && path
+        ? 'file://' + vaultPath.replace(/\\/g, '/').replace(/\/$/, '') + '/' + path.replace(/^\//, '')
+        : '';
+      const copyIcon = `<svg class="copy-icon" onclick="copyToClipboard(this)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+
+      const titleEl = fileUrl
+        ? `<a class="card-title" href="${fileUrl}" target="_blank" rel="noopener"><span class="field-label">Title:</span>${escapeHtml(title)}</a>`
+        : `<div class="card-title"><span class="field-label">Title:</span>${escapeHtml(title)}</div>`;
+      const typeEl = type ? `<div class="card-type" onclick="addToQuery('type = ${escapeHtml(String(type))}')">${escapeHtml(String(type))}</div>` : '';
+      const subtitleEl = subtitle ? `<div class="card-subtitle"><span class="field-label">Subtitle:</span>${escapeHtml(String(subtitle))}</div>` : '';
+      const urlEl = url ? `<div class="card-url"><span class="field-label">Url:</span><a class="card-link" href="${escapeHtml(String(url))}" target="_blank" rel="noopener">${escapeHtml(String(url))} ↗</a></div>` : '';
+      const pillsHtml = tags.map(t => `<span class="pill" onclick="addToQuery('tags = ${escapeHtml(String(t))}')">${escapeHtml(String(t))}</span>`).join('');
+
+      let metaHtml = '';
+      if (price != null) metaHtml += `<span class="meta-item"><span class="field-label">Price:</span>${escapeHtml(String(price))}</span>`;
+      if (links > 0 || backlinks > 0) {
+        if (metaHtml) metaHtml += '<span style="color:var(--muted);">&middot;</span>';
+        metaHtml += '<span>';
+        if (links > 0) metaHtml += `${links} link${links === 1 ? '' : 's'}`;
+        if (links > 0 && backlinks > 0) metaHtml += ' &middot; ';
+        if (backlinks > 0) metaHtml += `${backlinks} backlink${backlinks === 1 ? '' : 's'}`;
+        metaHtml += '</span>';
+      }
+
+      const pathEl = fileUrl
+        ? `<a class="card-path" href="${fileUrl}" target="_blank" rel="noopener" title="Open file (may be blocked by browser)"><span class="field-label">Path:</span>${escapeHtml(path)}</a>${copyIcon}`
+        : `<div class="card-path"><span class="field-label">Path:</span>${escapeHtml(path)}</div>${copyIcon}`;
+      const descEl = description ? `<div class="card-desc"><span class="field-label">Description:</span>${escapeHtml(String(description))}</div>` : '';
+
+      return `<div class="card">
+        <div class="card-header"><div class="card-title-row">${titleEl}${typeEl}</div>${subtitleEl}</div>
+        ${urlEl}${pathEl}${descEl}
+        ${pillsHtml ? `<div class="pills">${pillsHtml}</div>` : ''}
+        ${metaHtml ? `<div class="meta">${metaHtml}</div>` : ''}
+      </div>`;
+    }
+
+    function addToQuery(fragment) {
+      const current = qInput.value.trim();
+      qInput.value = current ? current + ' ' + fragment : fragment;
+      updateHighlight();
+    }
+
+    function copyToClipboard(el) {
+      const prev = el.previousElementSibling;
+      const text = prev ? (prev.getAttribute('href') || prev.textContent) : '';
+      if (!text) return;
+      navigator.clipboard.writeText(text).catch(() => {});
+      el.style.color = '#1a7f37';
+      setTimeout(() => { el.style.color = ''; }, 800);
+    }
+
+    function toggleRaw() {
+      if (!lastJson) return;
+      const willShow = rawEl.style.display !== 'block';
+      rawEl.style.display = willShow ? 'block' : 'none';
+      if (willShow && !rawEl.textContent) rawEl.textContent = JSON.stringify(lastJson, null, 2);
+    }
+
+    // --- Saved queries ---
+    function getSavedQueries() {
+      try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
+    }
+    function setSavedQueries(queries) { localStorage.setItem(STORAGE_KEY, JSON.stringify(queries)); renderRecent(); }
+    function saveQuery() {
+      const query = qInput.value;
+      if (!query.trim()) return;
+      let queries = getSavedQueries().filter(q => q !== query);
+      queries.unshift(query);
+      setSavedQueries(queries.slice(0, 10));
+    }
+    function runSavedQuery(query) { qInput.value = query; updateHighlight(); search(); }
+    function deleteSavedQuery(query) { setSavedQueries(getSavedQueries().filter(q => q !== query)); }
+    function clearAllSaved() { setSavedQueries([]); }
+    function renderRecent() {
+      const queries = getSavedQueries();
+      if (!queries.length) { recentWrap.style.display = 'none'; return; }
+      recentWrap.style.display = '';
+      recentChips.innerHTML = queries.map(q =>
+        `<div class="chip" title="${escapeHtml(q)}" onclick="runSavedQuery('${escapeHtml(q)}')">${escapeHtml(q)}<span class="del" onclick="event.stopPropagation(); deleteSavedQuery('${escapeHtml(q)}')">×</span></div>`
+      ).join('');
+    }
+
+    // --- Init ---
+    updateHighlight();
+    renderRecent();
+  </script>
+</body>
+</html>

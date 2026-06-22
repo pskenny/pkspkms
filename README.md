@@ -2,13 +2,23 @@
 
 **PK**'**S** **P**ersonal **K**nowledge **M**anagement **S**ystem
 
-A program that provides a single user HTTP API and command-line export tool for a Zettelkasten style personal knowledge 
-management directory.
+A program that provides a single user HTTP API and command-line export tool for a single directory Zettelkasten-style personal knowledge 
+management system (like an Obsidian Vault).
+
+Follows [0-based versioning](https://0ver.org/).
+
+## Structure
+
+This is a multi-module Maven project:
+
+- **`pkspkms-core`** — Reusable library containing domain objects, parsers, the query engine, repository abstractions, and the HTTP server.
+- **`pkspkms-desktop`** — Executable desktop launcher with CLI parsing and optional system tray.
 
 ## Build And Run
 
 Make sure you have Maven and JDK 17 installed and running correctly. The following commands use the example directory 
-in this repo (`test/data/pkms-examples/example`), you can try it out on your own data by replacing that value with your own directory. 
+in this repo (`test/data/pkms-examples/example`), you can try it out on your own data by replacing that value with your own directory.
+
 For reference:
 
 ```text
@@ -25,29 +35,57 @@ test/data/pkms-examples/example
     └── Neumann.jpg
 ```
 
+### Quick Start (build + install)
+
 ```shell
-# First, build pkspkms
+# Clone and build
 git clone git@github.com:pskenny/pkspkms.git ~/pkspkms
 cd pkspkms
-mvn clean package
+
+# Build the fat JAR (checks Java 17+ and Maven 3.6+)
+./build.sh
+
+# Install to ~/.local (creates a 'pkspkms' command, .desktop entry, and icon)
+./install.sh
 ```
 
-Try out exporting:
+The `install.sh` script creates a `pkspkms` wrapper so you don't need to type `java -jar ...` every time. It also installs a `.desktop` entry so PKSPKMS appears in your application menu (useful for launching with `--tray`).
+
+### Install options
+
+```shell
+./install.sh                    # Install to ~/.local (default)
+./install.sh --system           # Install to /usr/local (requires sudo)
+./install.sh --prefix ~/apps    # Install to a custom directory
+./install.sh --no-build         # Skip build (use existing JAR)
+./install.sh --uninstall        # Remove all installed files
+```
+
+### Try out exporting
 
 ```shell
 mkdir temp-dir
-# Run export using test directory
-java -jar target/pkspkms-0.1.0-ALPHA.jar export --directory test/data/pkms-examples/example --query "" --output temp-dir --type "markdown"
+pkspkms export --directory test/data/pkms-examples/example --query "" --output temp-dir --type "markdown"
 ```
 
-Try out the server:
+### Try out the server
 
 ```shell
 # Start server at port 23467 using test directory
-java -jar target/pkspkms-0.1.0-ALPHA.jar server --directory test/data/pkms-examples/example --port 23467
-# In another terminal 
+pkspkms server --directory test/data/pkms-examples/example --port 23467
+# In another terminal
 curl GET "http://localhost:23467/files/list" | jq .
 ```
+
+### System Tray
+
+On desktop environments with a system tray, you can add `--tray` to show an icon with a right-click menu:
+
+```shell
+java -jar pkspkms-desktop/target/pkspkms-desktop-0.1.0.jar server --directory test/data/pkms-examples/example --port 23467 --tray
+```
+
+The tray icon shows the server status, port, vault path, and the last log line. The menu includes an **"Open in Browser"** action and a **"Quit"** action for graceful shutdown. If the tray cannot be initialized (e.g. on a headless server), the application logs a warning and continues normally.
 
 Returns:
 
@@ -107,7 +145,15 @@ You can also query it, such as `curl GET "http://localhost:23467/files/list?tags
 ### Testing
 
 ```shell
+# Run all tests across both modules
 mvn clean test
+
+# Run core tests only
+mvn test -pl pkspkms-core
+
+# Generate Jacoco report (core module)
+mvn test -pl pkspkms-core
+open pkspkms-core/target/site/jacoco/index.html
 ```
 
 ## Known Issues

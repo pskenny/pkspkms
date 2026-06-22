@@ -9,5 +9,5 @@ views:
       and:
         - file.tags.containsAny("Tag")
     order:
-      - file.tags
+      - file.name
 ```
