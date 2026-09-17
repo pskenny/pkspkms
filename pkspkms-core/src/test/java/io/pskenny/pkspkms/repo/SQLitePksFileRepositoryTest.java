@@ -443,4 +443,27 @@ public class SQLitePksFileRepositoryTest {
             }
         }
     }
+
+    @Test
+    void load_excludesPkspkmsCacheDirectory() throws Exception {
+        // Cached plugin copies must not be indexed as vault notes (B55-adjacent
+        // Obsidian plugin prerequisite)
+        Files.createDirectories(TEST_DIR.resolve(".pkspkms-cache").resolve("@gwern"));
+        Files.writeString(TEST_DIR.resolve(".pkspkms-cache").resolve("@gwern").resolve("java.md"),
+                "---\ntags:\n  - Java\n---\ncached copy");
+        createFile(TEST_DIR, "keep.md", Map.of(), "");
+
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository(DB_URL, null, new JavaFileSystem(TEST_DIR.toFile()))) {
+            repository.loadDirectoryIntoRepository();
+
+            try (Statement stmt = repository.getConnection().createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT file_path FROM FILES ORDER BY file_path")) {
+                List<String> paths = new ArrayList<>();
+                while (rs.next()) {
+                    paths.add(rs.getString("file_path"));
+                }
+                assertEquals(List.of("keep.md"), paths);
+            }
+        }
+    }
 }
