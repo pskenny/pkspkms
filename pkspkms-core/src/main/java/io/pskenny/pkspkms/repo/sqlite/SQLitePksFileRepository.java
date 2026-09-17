@@ -150,12 +150,15 @@ public class SQLitePksFileRepository implements SqliteRepository {
 
     public Map<String, Object> cacheFile(String address, String location, String cacheDirectory) {
         try {
+            // Cache layout mirrors the pkspkms:// address (with @); the alias
+            // itself registers bare, so the lookup strips it
+            String alias = address.startsWith("@") ? address.substring(1) : address;
             String cacheRelPath = cacheDirectory + "/" + address + "/" + location;
 
             // Check if file already exists in cache
             if (!mainFs.exists(cacheRelPath)) {
                 // File not in cache - check if address is a virtual vault alias
-                PkmsFileSystem aliasFs = aliasFilesystems.get(address);
+                PkmsFileSystem aliasFs = aliasFilesystems.get(alias);
                 if (aliasFs != null && aliasFs.exists(location)) {
                     // Copy from alias fs to main fs cache
                     try (InputStream in = aliasFs.openInput(location)) {

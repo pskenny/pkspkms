@@ -170,7 +170,7 @@ java -Dorg.slf4j.simpleLogger.log.io.pskenny.pkspkms=debug -jar pkspkms-desktop/
 
 ## Known Issues
 
-- See [BUGS.md](BUGS.md) for the tracked list (~37 open)
+- See [BUGS.md](BUGS.md) for the tracked list (~28 open)
 
 ## Quirks
 

@@ -60,12 +60,15 @@ public class JavaFileSystem implements PkmsFileSystem {
     @Override
     public OutputStream openOutput(String relativePath) throws IOException {
         File destination = new File(root, relativePath).getCanonicalFile();
+
+        // Containment before mkdirs: a rejected path must not create
+        // directories outside the vault
+        if (!destination.getCanonicalPath().startsWith(root.getCanonicalPath() + File.separator)) {
+            throw new IOException("Path escapes the vault: " + relativePath);
+        }
         File parent = destination.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
             throw new IOException("Failed to create directory: " + parent);
-        }
-        if (!destination.getCanonicalPath().startsWith(root.getCanonicalPath() + File.separator)) {
-            throw new IOException("Path escapes the vault: " + relativePath);
         }
         return new FileOutputStream(destination);
     }

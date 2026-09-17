@@ -31,13 +31,18 @@ public class CacheEndpointTest {
     private static final String BASE_URL = "http://localhost:" + TEST_PORT;
     private static final Path TEST_DIR = Paths.get("target", "test-notes", CacheEndpointTest.class.getSimpleName());
     private static final Path CACHE_DIR = TEST_DIR.resolve(".pkspkms-cache");
+    private static final Path VIRTUAL_DIR = Paths.get("target", "test-notes", CacheEndpointTest.class.getSimpleName() + "-virtual");
+    private static final Path OUTSIDE_DIR = Paths.get("target", "test-notes", "outside-cache");
     private static Server app;
+    private SQLitePksFileRepository repository;
 
     @BeforeEach
     void setup() throws IOException {
         Files.createDirectories(TEST_DIR);
         Files.createDirectories(CACHE_DIR.resolve("@gwern/programming"));
         Files.writeString(CACHE_DIR.resolve("@gwern/programming/haskell.md"), "# Haskell\n\nContent about Haskell.");
+        Files.createDirectories(VIRTUAL_DIR);
+        Files.writeString(VIRTUAL_DIR.resolve("note.md"), "# Virtual note\n\nFrom the gwern vault.");
     }
 
     @AfterEach
@@ -46,14 +51,16 @@ public class CacheEndpointTest {
             app.stop();
         }
 
-        if (Files.exists(TEST_DIR)) {
-            try (Stream<Path> pathStream = Files.walk(TEST_DIR)) {
-                pathStream
-                        .sorted(Comparator.reverseOrder())
-                        .map(Path::toFile)
-                        .forEach(java.io.File::delete);
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to delete test directory", e);
+        for (Path dir : new Path[]{TEST_DIR, VIRTUAL_DIR, OUTSIDE_DIR}) {
+            if (Files.exists(dir)) {
+                try (Stream<Path> pathStream = Files.walk(dir)) {
+                    pathStream
+                            .sorted(Comparator.reverseOrder())
+                            .map(Path::toFile)
+                            .forEach(java.io.File::delete);
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed to delete test directory", e);
+                }
             }
         }
     }
@@ -61,7 +68,7 @@ public class CacheEndpointTest {
     void startServer() throws IOException {
         String dir = TEST_DIR.toAbsolutePath().toString();
         PkmsFileSystem fs = new JavaFileSystem(new File(dir));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + new File("pkspkms-cache-test.db").getAbsolutePath(), null, fs);
+        repository = new SQLitePksFileRepository("jdbc:sqlite:" + new File("pkspkms-cache-test.db").getAbsolutePath(), null, fs);
         app = new Server(TEST_PORT, repository);
         app.loadRepo();
         app.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
@@ -167,5 +174,67 @@ public class CacheEndpointTest {
         assertEquals(404, response.statusCode(), "Cache endpoint should return 404 for invalid directory");
         String body = response.body();
         assertTrue(body.contains("\"status\":\"error\""), "Response should have error status");
+    }
+
+    @Test
+    @DisplayName("GET /cache strips the leading @ and copies a new virtual-vault file")
+    void testCacheFirstClickCachesFromVirtualVault() throws IOException, InterruptedException, SQLException {
+        // pkspkms://@gwern/note.md -> /cache/@gwern/note.md: the alias registers
+        // bare, so the @ must be stripped server-side (first click, no cache yet)
+        startServer();
+        repository.loadVirtualVault(new JavaFileSystem(VIRTUAL_DIR.toFile()), "gwern");
+        HttpClient client = HttpClient.newHttpClient();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/cache/@gwern/note.md?directory=.pkspkms-cache"))
+                .GET()
+                .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), "First click should cache the file");
+        assertTrue(response.body().contains("\"status\":\"success\""), "Response should have success status");
+        assertTrue(Files.exists(CACHE_DIR.resolve("@gwern/note.md")), "Cached copy should exist on disk");
+
+        HttpRequest bareRequest = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/cache/gwern/note.md?directory=.pkspkms-cache"))
+                .GET()
+                .build();
+        HttpResponse<String> bareResponse = client.send(bareRequest, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, bareResponse.statusCode(), "Bare alias URLs keep working");
+    }
+
+    @Test
+    @DisplayName("GET /cache rejects location traversal outside the vault")
+    void testCacheLocationTraversalRejected() throws IOException, InterruptedException, SQLException {
+        startServer();
+        repository.loadVirtualVault(new JavaFileSystem(VIRTUAL_DIR.toFile()), "gwern");
+        HttpClient client = HttpClient.newHttpClient();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/cache/@gwern/..%2F..%2Fsecret.md?directory=.pkspkms-cache"))
+                .GET()
+                .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(404, response.statusCode(), "Traversal location must be rejected");
+    }
+
+    @Test
+    @DisplayName("GET /cache rejects directory escapes without creating them")
+    void testCacheDirectoryTraversalRejected() throws IOException, InterruptedException, SQLException {
+        // Bare alias on purpose: the copy path must be reached so the
+        // mkdirs-before-containment-check residual is exercised
+        startServer();
+        repository.loadVirtualVault(new JavaFileSystem(VIRTUAL_DIR.toFile()), "gwern");
+        HttpClient client = HttpClient.newHttpClient();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/cache/gwern/note.md?directory=../outside-cache"))
+                .GET()
+                .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertNotEquals(200, response.statusCode(), "Escaping directory must be rejected");
+        assertFalse(Files.exists(OUTSIDE_DIR), "Rejected paths must not create directories outside the vault");
     }
 }

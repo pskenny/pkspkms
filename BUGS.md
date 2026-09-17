@@ -1,13 +1,13 @@
 # BUGS
 
-Open bug list, last verified 2026-09-06. **29 open, 23 closed (22 fixed, 1 declined)** (closed entries removed — see git
+Open bug list, last verified 2026-09-06. **28 open, 24 closed (23 fixed, 1 declined)** (closed entries removed — see git
 history of this file). IDs are stable: gaps in numbering are closed bugs.
 
 ## P0 — Security
 
 | ID | Bug                                                                                                         | Location                                                                            |
 |----|-------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
-| B1 | Path traversal in `/cache`: URL parts reach file I/O uncanonicalized — arbitrary read + write outside vault | Server.java:99-133, SQLitePksFileRepository.java:152-211, JavaFileSystem.java:39-56 |
+| B1 | Path traversal in `/cache`: URL parts reach file I/O uncanonicalized — arbitrary read + write outside vault — **FIXED 2026-09-09** (`JavaFileSystem.openInput`/`exists`/`openOutput` canonicalize and verify containment; `openOutput` checks containment *before* `mkdirs` so rejected paths cannot create directories outside the vault; `cacheFile` strips a leading `@` for the alias lookup while keeping the `@alias` cache layout; pinned by CacheEndpointTest traversal + first-click tests) | JavaFileSystem.java, Server.java, SQLitePksFileRepository.java |
 | B2 | Unsandboxed Lua execution from note content (luabase blocks + filters, per DB row) — RCE in server process  | LuaBaseInterpreter.java:43-68, SQLitePksFileRepository.java:349-381                 |
 | B3 | Server posture: no auth, binds all interfaces, CORS `*`, advertises POST it rejects                         | Server.java:45, 78-79                                                               |
 | B4 | Webui XSS: `escapeHtml` misses quotes; note-controlled tags inject JS via `onclick='...'` attributes        | index.html:282, 313, 371-374, 440                                                   |

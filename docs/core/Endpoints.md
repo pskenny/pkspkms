@@ -46,7 +46,8 @@ and stores a BLAKE3 hash.
 | `address`   | the alias of a virtual vault       |
 | `location`  | file location in the virtual vault |
 
-> [!WARNING] This endpoint currently allows path traversal — see BUGS.md B1.
+> [!NOTE] Path traversal is rejected: locations are contained inside the
+> virtual vault and the cache directory inside the vault (BUGS.md B1, fixed).
 
 ## `/openapi.json`
 
