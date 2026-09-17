@@ -38,7 +38,7 @@ public final class TrayManager {
     }
 
     private void init(String directory) {
-        try (InputStream is = getClass().getResourceAsStream("/brain-icon.png")) {
+        try (InputStream is = getClass().getResourceAsStream("/pk.png")) {
             if (is != null) {
                 systemTray.setImage(is);
             } else {
@@ -83,12 +83,6 @@ public final class TrayManager {
     public void setLastEvent(String event) {
         if (lastItem != null) {
             lastItem.setText("Last: " + truncate(event, 55));
-        }
-    }
-
-    public void refreshLastFromLog() {
-        if (logCapture != null && lastItem != null) {
-            lastItem.setText("Last: " + truncate(logCapture.getLastLine(), 55));
         }
     }
 

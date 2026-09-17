@@ -14,8 +14,9 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <!-- release (not source/target): enforces Java 17 language AND platform API,
+             so Java 21+ APIs fail to compile regardless of the building JDK -->
+        <maven.compiler.release>17</maven.compiler.release>
     </properties>
 
     <modules>

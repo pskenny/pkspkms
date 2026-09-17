@@ -1,44 +1,52 @@
 package io.pskenny.pkspkms.io;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.Serial;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-public final class PksFile implements java.io.Serializable {
+public final class PksFile {
 
-    private transient final String filePath;
     private Map<String, Object> properties;
-    private final transient File file;
+    private String hash;
+    private long lastModified;
 
     public PksFile(String filePath, Map<String, Object> properties) {
-        this.filePath = filePath;
-        this.properties = new HashMap<>(properties);
-        this.file = new File(filePath);
-
+        this.properties = new LinkedHashMap<>(properties);
         this.properties.put("filePath", filePath);
     }
 
-    public PksFile(File file, String directory, Map<String, Object> properties) {
-        this.properties = new HashMap<>(properties);
-        this.file = file;
-        try {
-            var dirPath = java.nio.file.Paths.get(directory).toRealPath();
-            var filePathReal = file.toPath().toRealPath();
-            filePath = dirPath.relativize(filePathReal).toString().replace(java.io.File.separatorChar, '/');
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
-        }
+    public PksFile(java.io.File file, String directory, Map<String, Object> properties) {
+        String filePath = getFilePath(file, directory);
+        this.properties = new LinkedHashMap<>(properties);
         this.properties.put("filePath", filePath);
     }
 
     public PksFile(PksFile source) {
-        this.filePath = source.filePath;
-        this.properties = new HashMap<>(source.getProperties());
-        this.file = new File(source.filePath);
+        this.properties = new LinkedHashMap<>(source.getMutableProperties());
+        this.hash = source.hash;
+        this.lastModified = source.lastModified;
+    }
+
+    public PksFile(PksFile source, String newFilePath) {
+        this.properties = new LinkedHashMap<>(source.getMutableProperties());
+        this.properties.put("filePath", newFilePath);
+        this.hash = source.hash;
+        this.lastModified = source.lastModified;
+    }
+
+    private String getFilePath(java.io.File file, String directory) {
+        try {
+            String dirCanonical = new java.io.File(directory).getCanonicalPath();
+            String fileCanonical = file.getCanonicalPath();
+            if (!fileCanonical.startsWith(dirCanonical)) {
+                throw new IllegalStateException("File " + fileCanonical + " is not under " + dirCanonical);
+            }
+            return fileCanonical.substring(dirCanonical.length() + 1)
+                    .replace(java.io.File.separatorChar, '/');
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -51,24 +59,46 @@ public final class PksFile implements java.io.Serializable {
     }
 
     public void addToProperty(String key, List<String> items) {
-        List<String> list = (List<String>) properties.computeIfAbsent(key, k -> new ArrayList<String>());
-        list.addAll(items);
-    }
-
-    public File getFile() {
-        return this.file;
+        Object existing = properties.get(key);
+        if (existing instanceof List<?> list) {
+            @SuppressWarnings("unchecked")
+            List<String> typed = (List<String>) list;
+            typed.addAll(items);
+        } else {
+            properties.put(key, new ArrayList<>(items));
+        }
     }
 
     public String getFilePath() {
-        return this.filePath;
+        return (String) properties.get("filePath");
     }
 
-    public Map<String, Object> getProperties() {
+    public String getHash() {
+        return this.hash;
+    }
+
+    public void setHash(String hash) {
+        this.hash = hash;
+    }
+
+    public long getLastModified() {
+        return this.lastModified;
+    }
+
+    public void setLastModified(long lastModified) {
+        this.lastModified = lastModified;
+    }
+
+    /**
+     * Returns the live, mutable property map. Changes made to the returned map
+     * affect this PksFile instance permanently.
+     */
+    public Map<String, Object> getMutableProperties() {
         return this.properties;
     }
 
     public void filterProperties(List<String> include, List<String> exclude) {
-        var filteredProperties = new HashMap<>(this.properties);
+        var filteredProperties = new LinkedHashMap<>(this.properties);
 
         if (include != null && !include.isEmpty()) {
             filteredProperties.keySet().retainAll(include);

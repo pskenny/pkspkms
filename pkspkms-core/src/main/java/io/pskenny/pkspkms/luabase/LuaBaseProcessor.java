@@ -7,7 +7,6 @@ import io.pskenny.pkspkms.repo.PksFileRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.sql.SQLException;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -15,6 +14,7 @@ import java.util.stream.Collectors;
 // have a  default 1-to-1 representation for
 public class LuaBaseProcessor {
     private static final Logger logger = LoggerFactory.getLogger(LuaBaseProcessor.class);
+
     private final LuaBaseInterpreter luaBaseInterpreter;
 
     public LuaBaseProcessor() {
@@ -23,37 +23,23 @@ public class LuaBaseProcessor {
 
     public String process(Map<String, Object> spec, Map<String, PksFile> files) {
         addFormulas(spec);
-        Map<String, PksFile> filteredFiles = applyFilters(spec, files);
-        Map<String, PksFile> sortedFiles = applySort(spec, filteredFiles);
-        return render(spec, sortedFiles.values());
+        ViewSpec viewSpec = ViewSpec.from(spec);
+        List<PksFile> filteredFiles = applyFilters(viewSpec, files);
+        List<PksFile> sortedFiles = applySort(viewSpec, filteredFiles);
+        return render(viewSpec, sortedFiles);
     }
 
     public String process(Map<String, Object> spec, PksFileRepository repository) {
-        // add the functions to as SQLite user defined functions
         addFormulas(spec);
-        // generate yaml obsidian base filter to sql query
-        Map filters = null;
-        List filtersList = null;
-        ArrayList views = (ArrayList) spec.get("views");
-        for (Object view : views) {
-            if (view instanceof Map mapView) {
-                if (mapView.containsKey("filters")) {
-                    var obj = (LinkedHashMap) mapView.get("filters");
-                    filters = obj;
-                }
-            }
-        }
-        String luaFilter = filterYamlToExpression(filters);
-        List<PksFile> files = new ArrayList<>();
-        try {
-            files = repository.searchWithLuaFilter(luaFilter);
-        } catch (SQLException e) {
-            logger.error("Error searching with Lua filter: {}", luaFilter);
-            return "Error searching with Lua filter: " + luaFilter;
-        }
+        ViewSpec viewSpec = ViewSpec.from(spec);
+        String luaFilter = filterYamlToExpression(viewSpec.filters());
+        List<PksFile> files = repository.searchWithLuaFilter(luaFilter);
+        List<PksFile> sortedFiles = applySort(viewSpec, files);
+        return render(viewSpec, sortedFiles);
+    }
 
-//        Map<String, PksFile> sortedFiles = applySort(spec, filteredFiles);
-        return render(spec, files);
+    public void validateLuaFilter(String luaFilter) {
+        luaBaseInterpreter.validateExpression(luaFilter);
     }
 
     String filterYamlToExpression(Object spec) { // Changed input to Object for recursion
@@ -96,7 +82,7 @@ public class LuaBaseProcessor {
             return strSpec; // Or whatever default field you want for raw strings
         }
 
-        return "true";
+        throw new IllegalArgumentException("Unexpected filter spec type: " + spec.getClass().getName());
     }
 
     private boolean isLogical(String key) {
@@ -104,17 +90,16 @@ public class LuaBaseProcessor {
                 key.equalsIgnoreCase("or") || key.equalsIgnoreCase("any");
     }
 
-    Map<String, PksFile> applyFilters(Map<String, Object> spec, Map<String, PksFile> files) {
-        Map<String, Object> viewSpec = ((List<Map<String, Object>>) spec.get("views")).get(0);
-        Map<String, Object> filtersSpec = (Map<String, Object>) viewSpec.get("filters");
+    List<PksFile> applyFilters(ViewSpec viewSpec, Map<String, PksFile> files) {
+        Map<String, Object> filtersSpec = viewSpec.filters();
         if (filtersSpec == null || filtersSpec.isEmpty()) {
-            return files;
+            return new ArrayList<>(files.values());
         }
 
         // Filters the map by evaluating the filter tree on each PksFile's properties
-        return files.entrySet().stream()
-                .filter(entry -> evaluateFilterTree(filtersSpec, entry.getValue().getProperties()))
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        return files.values().stream()
+                .filter(file -> evaluateFilterTree(filtersSpec, file.getMutableProperties()))
+                .collect(Collectors.toList());
     }
 
     void addFormulas(Map<String, Object> spec) {
@@ -156,55 +141,100 @@ public class LuaBaseProcessor {
         return evaluateFilterTree((Map<String, Object>) condition, file);
     }
 
-    private Map<String, PksFile> applySort(Map<String, Object> spec, Map<String, PksFile> files) {
-        Map<String, Object> viewSpec = ((List<Map<String, Object>>) spec.get("views")).get(0);
-        List<String> sortSpec = (List<String>) viewSpec.get("sort");
+    private List<PksFile> applySort(ViewSpec viewSpec, Collection<PksFile> files) {
+        List<Map<String, Object>> sortSpec = viewSpec.sort();
         if (sortSpec == null || sortSpec.isEmpty()) {
-            return files;
+            return new ArrayList<>(files);
         }
 
-        LinkedHashMap<String, String> sort = (LinkedHashMap<String, String>) sortSpec.toArray()[0];
-        String property = sort.get("property");
-        String direction = sort.get("direction");
+        Map<String, Object> sort = sortSpec.get(0);
+        String property = (String) sort.get("property");
+        String direction = (String) sort.get("direction");
 
-        List<Map.Entry<String, PksFile>> sortedEntries = new java.util.ArrayList<>(files.entrySet());
-        sortedEntries.sort(buildComparator(property, direction));
-
-        Map<String, PksFile> sortedMap = new java.util.LinkedHashMap<>(files.size());
-        for (Map.Entry<String, PksFile> entry : sortedEntries) {
-            sortedMap.put(entry.getKey(), entry.getValue());
-        }
-
-        return sortedMap;
+        List<PksFile> sorted = new ArrayList<>(files);
+        sorted.sort(buildComparator(property, direction));
+        return sorted;
     }
 
-    private Comparator<Map.Entry<String, PksFile>> buildComparator(String property, String direction) {
+    private Comparator<PksFile> buildComparator(String property, String direction) {
         return (a, b) -> {
-            Comparable valueA = (Comparable) a.getValue().getProperties().get(property);
-            Comparable valueB = (Comparable) b.getValue().getProperties().get(property);
+            Object valueA = a.getMutableProperties().get(property);
+            Object valueB = b.getMutableProperties().get(property);
 
-            if (valueA == null || valueB == null) {
-                return 0;
-            }
+            if (valueA == null && valueB == null) return 0;
+            if (valueA == null) return 1;
+            if (valueB == null) return -1;
 
-            if (valueA.compareTo(valueB) != 0) {
-                return "desc".equalsIgnoreCase(direction) ? valueB.compareTo(valueA) : valueA.compareTo(valueB);
-            }
-
-            return 0;
+            int result = compareValues(valueA, valueB);
+            return "desc".equalsIgnoreCase(direction) ? -result : result;
         };
     }
 
-    private String render(Map<String, Object> spec, Collection<PksFile> files) {
-        Map<String, Object> viewSpec = ((List<Map<String, Object>>) spec.get("views")).get(0);
-
-        if(viewSpec.get("type").equals("list")) {
-            ListRenderer listRenderer = new ListRenderer();
-            return listRenderer.render(spec, files, luaBaseInterpreter);
-        } else if (viewSpec.get("type").equals("table")) {
-            TableRenderer tableRenderer = new TableRenderer();
-            return tableRenderer.render(spec, files, luaBaseInterpreter);
+    // Same-type values compare naturally; cross-type values fall back so one exotic
+    // property value can't abort the whole base render. ISO dates compare correctly
+    // as strings.
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private int compareValues(Object a, Object b) {
+        if (a.getClass() == b.getClass() && a instanceof Comparable comparableA) {
+            try {
+                return comparableA.compareTo(b);
+            } catch (ClassCastException e) {
+                // fall through
+            }
         }
-        return "ERROR I don't know how to handle LuaBase type: " + viewSpec.get("type");
+        if (a instanceof Number numberA && b instanceof Number numberB) {
+            return Double.compare(numberA.doubleValue(), numberB.doubleValue());
+        }
+        return String.valueOf(a).compareTo(String.valueOf(b));
+    }
+
+    private String render(ViewSpec viewSpec, Collection<PksFile> files) {
+        String type = viewSpec.type();
+        if ("cards".equals(type) || "map".equals(type)) {
+            logger.debug("View type '{}' cannot be rendered, defaulting to table", type);
+            type = "table";
+        }
+        if ("list".equals(type)) {
+            ListRenderer listRenderer = new ListRenderer();
+            return listRenderer.render(viewSpec.order(), files, luaBaseInterpreter);
+        } else if ("table".equals(type)) {
+            TableRenderer tableRenderer = new TableRenderer();
+            return tableRenderer.render(viewSpec.order(), files, luaBaseInterpreter);
+        }
+        throw new IllegalArgumentException("Unknown view type: " + type);
+    }
+
+    static final class ViewSpec {
+        private final String type;
+        private final Map<String, Object> filters;
+        private final List<String> order;
+        private final List<Map<String, Object>> sort;
+
+        ViewSpec(String type, Map<String, Object> filters, List<String> order, List<Map<String, Object>> sort) {
+            this.type = type;
+            this.filters = filters;
+            this.order = order;
+            this.sort = sort;
+        }
+
+        String type() { return type; }
+        Map<String, Object> filters() { return filters; }
+        List<String> order() { return order; }
+        List<Map<String, Object>> sort() { return sort; }
+
+        @SuppressWarnings("unchecked")
+        static ViewSpec from(Map<String, Object> spec) {
+            List<Map<String, Object>> views = (List<Map<String, Object>>) spec.get("views");
+            if (views == null || views.isEmpty()) {
+                throw new IllegalArgumentException("Spec must contain at least one view");
+            }
+            Map<String, Object> view = views.get(0);
+            return new ViewSpec(
+                    (String) view.get("type"),
+                    (Map<String, Object>) view.get("filters"),
+                    (List<String>) view.get("order"),
+                    (List<Map<String, Object>>) view.get("sort")
+            );
+        }
     }
 }

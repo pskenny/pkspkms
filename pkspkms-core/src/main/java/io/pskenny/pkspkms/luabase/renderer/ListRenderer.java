@@ -6,13 +6,10 @@ import io.pskenny.pkspkms.luabase.LuaBaseInterpreter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 
 public class ListRenderer {
-    public String render(Map<String, Object> spec, Collection<PksFile> files, LuaBaseInterpreter luaBaseInterpreter) {
+    public String render(List<String> orderSpec, Collection<PksFile> files, LuaBaseInterpreter luaBaseInterpreter) {
         StringBuilder sb = new StringBuilder();
-        Map<String, Object> viewSpec = ((List<Map<String, Object>>) spec.get("views")).get(0);
-        List<String> orderSpec = (List<String>) viewSpec.get("order");
 
         if (orderSpec == null || orderSpec.isEmpty()) {
             // what do you do when you aren't given an order? every file has a filePath
@@ -23,7 +20,7 @@ public class ListRenderer {
         List<String> finalOrderSpec = orderSpec;
         files.forEach(pksFile -> {
             StringBuilder row = new StringBuilder("-");
-            Map<String, Object> fileProperties = pksFile.getProperties();
+            java.util.Map<String, Object> fileProperties = pksFile.getMutableProperties();
             finalOrderSpec.forEach(colSpec -> {
                 String expression = colSpec.substring(0, colSpec.lastIndexOf(","));
                 String propertyValue = luaBaseInterpreter.evaluateLuaExpression(expression, fileProperties).tojstring();

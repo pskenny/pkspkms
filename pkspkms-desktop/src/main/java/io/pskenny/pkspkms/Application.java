@@ -1,8 +1,12 @@
 package io.pskenny.pkspkms;
 
 import io.pskenny.pkspkms.desktop.LogCapture;
+import io.pskenny.pkspkms.desktop.TrayFactory;
 import io.pskenny.pkspkms.desktop.TrayManager;
-import io.pskenny.pkspkms.repo.SQLitePksFileRepository;
+import io.pskenny.pkspkms.io.fs.JavaFileSystem;
+import io.pskenny.pkspkms.io.fs.PkmsFileSystem;
+import io.pskenny.pkspkms.repo.sqlite.SQLitePksFileRepository;
+import io.pskenny.pkspkms.repo.sqlite.SQLiteLuaConnector;
 import net.sourceforge.argparse4j.ArgumentParsers;
 import net.sourceforge.argparse4j.impl.Arguments;
 import net.sourceforge.argparse4j.inf.ArgumentParser;
@@ -12,8 +16,12 @@ import net.sourceforge.argparse4j.inf.Namespace;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.io.IOException;
-import java.sql.SQLException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 
 public final class Application {
@@ -22,19 +30,21 @@ public final class Application {
     public static void main(String[] args) {
         try {
             new Application(args);
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException | io.pskenny.pkspkms.repo.query.QueryParseException e) {
+            LoggerFactory.getLogger(Application.class).error("Bad query: {}", e.getMessage());
             System.exit(1);
-        } catch (IOException | SQLException e) {
-            LoggerFactory.getLogger(Application.class).error("Runtime error: {}", e.getMessage(), e);
+        } catch (IOException e) {
+            LoggerFactory.getLogger(Application.class).error("Runtime error, could start PKSPKMS: {}",
+                    e.getMessage(), e);
             System.exit(1);
         }
     }
 
-    public Application(String[] args) throws IOException, SQLException {
+    public Application(String[] args) throws IOException {
         Namespace ns = parseArguments(args);
-
         String command = ns.getString("command");
         switch(command) {
+            // start server
             case "server":
                 String directory = ns.getString("directory");
                 int port = ns.getInt("port");
@@ -45,13 +55,16 @@ public final class Application {
                 LogCapture logCapture = null;
                 CountDownLatch latch = null;
 
+                // setup tray — non-blocking: falls back headless if init fails or stalls (B55)
                 if (tray) {
                     logCapture = new LogCapture();
                     try {
-                        trayManager = new TrayManager(port, directory, logCapture);
-                        latch = new CountDownLatch(1);
-                        trayManager.setOnQuit(latch::countDown);
-                        trayManager.setStatus("Loading vault...");
+                        trayManager = TrayFactory.createOrFallback(port, directory, logCapture);
+                        if (trayManager != null) {
+                            latch = new CountDownLatch(1);
+                            trayManager.setOnQuit(latch::countDown);
+                            trayManager.setStatus("Loading vault...");
+                        }
                     } catch (Exception | Error e) {
                         logger.warn("System tray unavailable, continuing without tray: {}", e.getMessage());
                         if (trayManager != null) {
@@ -63,9 +76,35 @@ public final class Application {
                     }
                 }
 
-                SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + dbPath);
-                Server server = new Server(port, repository, directory);
-                server.loadRepo(directory);
+                //  Load main directory
+                PkmsFileSystem vaultFs = new JavaFileSystem(new File(directory));
+                SQLitePksFileRepository repository = new SQLitePksFileRepository(
+                        "jdbc:sqlite:" + dbPath,
+                        SQLiteLuaConnector.luaFunctionRegistrar(),
+                        vaultFs);
+                Server server = new Server(port, repository);
+                server.loadRepo();
+
+                // Load virtual friends
+                List<String> virtualVaults = ns.get("virtual_vault");
+                if (virtualVaults != null) {
+                    for (String spec : virtualVaults) {
+                        String[] parts = spec.split(":", 2);
+                        if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
+                            throw new IllegalArgumentException("Invalid --virtual-vault format: " + spec + ". Expected: alias:/path/to/vault");
+                        }
+                        String alias = parts[0];
+                        String path = parts[1];
+                        Path vDirPath = Paths.get(path);
+                        if (!Files.exists(vDirPath) || !Files.isDirectory(vDirPath)) {
+                            throw new IllegalArgumentException("Directory does not exist: " + path);
+                        }
+                        logger.info("Loading virtual vault: @{} -> {}", alias, path);
+                        PkmsFileSystem aliasFs = new JavaFileSystem(new File(path));
+                        server.loadVirtualVault(aliasFs, alias);
+                    }
+                }
+
                 server.start();
                 logger.info("Server started on http://localhost:{}", port);
 
@@ -86,15 +125,14 @@ public final class Application {
                     Thread.currentThread().interrupt();
                     logger.info("Server interrupted, shutting down");
                 } finally {
-                    if (trayManager != null) {
-                        trayManager.shutdown();
-                    }
+                    TrayFactory.shutdownQuietly(trayManager, 5);
                     if (logCapture != null) {
                         logCapture.restore();
                     }
                     server.stop();
                 }
                 break;
+            // export command
             case "export":
                 Export.ExportConfig exportConfig = new Export.ExportConfig(
                         ns.getString("directory"),
@@ -102,15 +140,47 @@ public final class Application {
                         ns.getString("query"),
                         ns.getString("output"),
                         ns.getString("type"),
-                        ns.getString("options"),
-                        ns.getBoolean("dryrun"),
-                        ns.getBoolean("load")
+                        ns.getBoolean("dryrun")
                     );
 
-                SQLitePksFileRepository exportRepo = new SQLitePksFileRepository("jdbc:sqlite:" + exportConfig.dbPath());
-                exportRepo.loadDirectoryIntoRepository(exportConfig.directory());
-                new Export(exportConfig, exportRepo).export();
+                PkmsFileSystem exportInputFs = new JavaFileSystem(new File(exportConfig.directory()));
+                PkmsFileSystem exportOutputFs = new JavaFileSystem(new File(exportConfig.output()));
+                SQLitePksFileRepository exportRepo = new SQLitePksFileRepository("jdbc:sqlite:" + exportConfig.dbPath(), SQLiteLuaConnector.luaFunctionRegistrar(), exportInputFs);
+                exportRepo.loadDirectoryIntoRepository();
+
+                new Export(exportConfig, exportRepo, exportInputFs, exportOutputFs).export();
                 exportRepo.close();
+                break;
+            case "add":
+                String addCommand = ns.getString("add_command");
+                if ("directory".equals(addCommand)) {
+                    String addDbPath = ns.getString("add_db");
+                    String addDirectory = ns.getString("add_directory");
+                    String addAlias = ns.getString("add_alias");
+
+                    if (addDirectory == null || addAlias == null) {
+                        throw new IllegalArgumentException("--directory and --alias are required for 'add directory' command");
+                    }
+
+                    Path dirPath = Paths.get(addDirectory);
+                    if (!Files.exists(dirPath) || !Files.isDirectory(dirPath)) {
+                        throw new IllegalArgumentException("Directory does not exist: " + addDirectory);
+                    }
+
+                    PkmsFileSystem addVaultFs = new JavaFileSystem(new File(addDirectory));
+                    SQLitePksFileRepository addRepo = new SQLitePksFileRepository("jdbc:sqlite:" + addDbPath, SQLiteLuaConnector.luaFunctionRegistrar(), addVaultFs);
+                    try {
+                        if (addRepo.vaultAliasExists(addAlias)) {
+                            throw new IllegalArgumentException("Vault alias already exists: " + addAlias);
+                        }
+                        addRepo.loadVirtualVault(addVaultFs, addAlias);
+                        logger.info("Virtual vault added: @{} -> {}", addAlias, addDirectory);
+                    } finally {
+                        addRepo.close();
+                    }
+                } else {
+                    throw new IllegalArgumentException("Unknown add command: " + addCommand);
+                }
                 break;
             default:
                 throw new IllegalArgumentException("Unknown command: " + command);
@@ -125,6 +195,7 @@ public final class Application {
                 .dest("command");
         addServerSubparser(subparsers);
         addExportSubparser(subparsers);
+        addAddSubparser(subparsers);
 
         Namespace ns = null;
         try {
@@ -154,6 +225,10 @@ public final class Application {
                 .action(Arguments.storeTrue())
                 .setDefault(Boolean.FALSE)
                 .help("Show a system tray icon (desktop environments only)");
+        serverParser.addArgument("--virtual-vault")
+                .type(String.class)
+                .action(Arguments.append())
+                .help("Virtual vault in 'alias:/path/to/vault' format (repeatable)");
     }
 
     private void addExportSubparser(Subparsers subparsers) {
@@ -180,18 +255,29 @@ public final class Application {
                 .choices("markdown", "copy")
                 .required(true)
                 .help("Type of export (markdown or copy)");
-        exportParser.addArgument("--options")
-                .type(String.class)
-                .help("Comma-separated options (e.g. \"copyLinkedFiles,other\" )");
         exportParser.addArgument("--dryrun")
                 .type(Boolean.class)
                 .required(false)
                 .action(Arguments.storeTrue())
                 .setDefault(Boolean.FALSE)
                 .help("Don't write any changes to disk.");
-        exportParser.addArgument("--load")
-                .action(Arguments.storeTrue())
-                .setDefault(Boolean.FALSE)
-                .help("Load data from previously saved (serialised) files instead of regenerating.");
+    }
+
+    private void addAddSubparser(Subparsers subparsers) {
+        ArgumentParser addParser = subparsers.addParser("add")
+                .help("Add a virtual vault");
+        Subparsers addSubparsers = addParser.addSubparsers()
+                .dest("add_command");
+        
+        ArgumentParser addDirParser = addSubparsers.addParser("directory")
+                .help("Add a directory as a virtual vault");
+        addDirParser.addArgument("--directory")
+                .type(String.class)
+                .required(true)
+                .help("Directory to add as virtual vault");
+        addDirParser.addArgument("--alias")
+                .type(String.class)
+                .required(true)
+                .help("Alias for the virtual vault");
     }
 }
