@@ -5,8 +5,6 @@
 A program that provides a single user HTTP API and command-line export tool for a single directory Zettelkasten-style personal knowledge 
 management system (like an Obsidian Vault).
 
-Follows [0-based versioning](https://0ver.org/).
-
 ## Structure
 
 This is a multi-module Maven project:
@@ -42,26 +40,11 @@ test/data/pkms-examples/example
 git clone git@github.com:pskenny/pkspkms.git ~/pkspkms
 cd pkspkms
 
-# Build the fat JAR (checks Java 17+ and Maven 3.6+)
-./build.sh
-
-# Install to ~/.local (creates a 'pkspkms' command, .desktop entry, and icon)
-./install.sh
+# Build the fat JAR (checks Java 17+ and Maven 3.6+) and installs to ~/.local (creates a 'pkspkms' command)
+./build.sh && ./install.sh
 ```
 
-The `install.sh` script creates a `pkspkms` wrapper so you don't need to type `java -jar ...` every time. It also installs a `.desktop` entry so PKSPKMS appears in your application menu (useful for launching with `--tray`).
-
-### Install options
-
-```shell
-./install.sh                    # Install to ~/.local (default)
-./install.sh --system           # Install to /usr/local (requires sudo)
-./install.sh --prefix ~/apps    # Install to a custom directory
-./install.sh --no-build         # Skip build (use existing JAR)
-./install.sh --uninstall        # Remove all installed files
-```
-
-### Try out exporting
+### Try Out Exporting
 
 ```shell
 mkdir temp-dir
@@ -71,10 +54,33 @@ pkspkms export --directory test/data/pkms-examples/example --query "" --output t
 ### Try out the server
 
 ```shell
-# Start server at port 23467 using test directory
+# Start server at port 23467 using test directory (default port is 3000)
 pkspkms server --directory test/data/pkms-examples/example --port 23467
 # In another terminal
 curl GET "http://localhost:23467/files/list" | jq .
+```
+
+### Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /ping` | Liveness check |
+| `GET /files/list?query=<q>` | Query files by property (Lucene-style syntax); empty `query` matches all |
+| `GET /files/search?query=<q>` | Alias of `/files/list` |
+| `GET /files/list/graph?query=<q>` | Same, reduced to `filePath`, `links`, `backlinks`, `tags` |
+| `GET /webui/` | Browser UI |
+| `GET /cache/{address}/{location}?directory=<dir>` | Copy a file from a virtual vault into the cache directory |
+| `GET /openapi.json` | OpenAPI 3.0 spec (`servers` URL rewritten to the running port) |
+| `GET /webui/swagger` | Swagger UI rendering the spec |
+
+Query syntax (Lucene-style): `tags:PKSPKMS`, `filePath:*.md`, `NOT tags:Archive`, `price:[1 TO 5]`, `status:(todo OR done)`, quoted phrases, wildcards `* ?`. Malformed queries return HTTP 400.
+
+### Virtual vaults
+
+Mount other directories alongside the main vault with `@alias/`-prefixed paths:
+
+```shell
+pkspkms server --directory <vault> --virtual-vault gwern:/path/to/other/vault --port 3000
 ```
 
 ### System Tray
@@ -82,7 +88,7 @@ curl GET "http://localhost:23467/files/list" | jq .
 On desktop environments with a system tray, you can add `--tray` to show an icon with a right-click menu:
 
 ```shell
-java -jar pkspkms-desktop/target/pkspkms-desktop-0.1.0.jar server --directory test/data/pkms-examples/example --port 23467 --tray
+java -jar pkspkms-desktop/target/pkspkms-desktop-0.1.0.jar server --directory test/data/pkms-examples/example --port 9239 --tray
 ```
 
 The tray icon shows the server status, port, vault path, and the last log line. The menu includes an **"Open in Browser"** action and a **"Quit"** action for graceful shutdown. If the tray cannot be initialized (e.g. on a headless server), the application logs a warning and continues normally.
@@ -124,7 +130,7 @@ Returns:
 }
 ```
 
-You can also query it, such as `curl GET "http://localhost:23467/files/list?tags=Tag" | jq .` returns:
+You can also query it, such as `curl GET "http://localhost:9239/files/list?query=tags=Tag" | jq .` returns:
 
 ```json
 {
@@ -147,15 +153,26 @@ You can also query it, such as `curl GET "http://localhost:23467/files/list?tags
 ```shell
 # Run all tests across both modules
 mvn clean test
-
 # Run core tests only
 mvn test -pl pkspkms-core
-
 # Generate Jacoco report (core module)
 mvn test -pl pkspkms-core
 open pkspkms-core/target/site/jacoco/index.html
 ```
 
+## Logging
+
+Logging is SLF4J/simple, `INFO` by default. Turn on debug output per package:
+
+```shell
+java -Dorg.slf4j.simpleLogger.log.io.pskenny.pkspkms=debug -jar pkspkms-desktop/target/pkspkms-desktop-0.1.0.jar server --directory <vault> --port 3000
+```
+
 ## Known Issues
 
-- Lots
+- See [BUGS.md](BUGS.md) for the tracked list (~37 open)
+
+## Quirks
+
+- For compatibility uses same types for Markdown frontmatter as Obsidian: `date`, `datetime`, `number`, `text`, 
+  `multitext`, `checkbox`

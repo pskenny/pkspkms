@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PKSPKMS API docs</title>
+  <link rel="icon" type="image/png" href="/webui/pk.png">
+  <link rel="stylesheet" href="swagger-ui.css">
+  <style>
+    body { margin: 0; }
+    .topbar { padding: 0.5rem 1rem; background: #1a1a2e; }
+    .topbar a { color: #58a6ff; font: 600 0.9rem sans-serif; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="topbar"><a href="/webui/">&larr; PKSPKMS</a></div>
+  <div id="swagger-ui"></div>
+  <script src="swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = function() {
+      SwaggerUIBundle({
+        url: "/openapi.json",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis],
+        layout: "BaseLayout"
+      });
+    };
+  </script>
+</body>
+</html>
