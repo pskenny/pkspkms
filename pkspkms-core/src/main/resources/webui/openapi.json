@@ -105,7 +105,7 @@
         "parameters": [
           { "name": "address", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Virtual vault alias (as passed to --virtual-vault)" },
           { "name": "location", "in": "path", "required": true, "schema": { "type": "string" }, "description": "File location within the virtual vault" },
-          { "name": "directory", "in": "query", "required": true, "schema": { "type": "string" }, "description": "Directory to cache the copy into" }
+          { "name": "directory", "in": "query", "required": true, "schema": { "type": "string" }, "description": "Directory to cache the copy into. Relative paths resolve under the vault (recommended: .pkspkms-cache); absolute paths are honoured when inside the vault and rejected otherwise." }
         ],
         "responses": {
           "200": {

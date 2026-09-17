@@ -24,9 +24,26 @@ public class JavaFileSystem implements PkmsFileSystem {
         return result;
     }
 
+    // Resolves a request path to a File under the vault root. Absolute paths
+    // are honoured when inside the vault: File(root, absolute) concatenates
+    // on Unix, so they must be relativized first. Escapes are rejected.
+    private File fileFor(String relativePath) throws IOException {
+        File raw = new File(relativePath);
+        if (!raw.isAbsolute()) {
+            return new File(root, relativePath);
+        }
+
+        String absolute = raw.getCanonicalPath();
+        String rootPath = root.getCanonicalPath();
+        if (!absolute.startsWith(rootPath + File.separator)) {
+            throw new IOException("Path escapes the vault: " + relativePath);
+        }
+        return new File(root, absolute.substring(rootPath.length() + 1));
+    }
+
     @Override
     public PkmsEntry resolve(String relativePath) throws IOException {
-        File file = new File(root, relativePath).getCanonicalFile();
+        File file = fileFor(relativePath).getCanonicalFile();
         String rootCanonical = root.getCanonicalPath();
         String fileCanonical = file.getCanonicalPath();
         if (!fileCanonical.startsWith(rootCanonical)) {
@@ -37,7 +54,7 @@ public class JavaFileSystem implements PkmsFileSystem {
 
     @Override
     public InputStream openInput(String relativePath) throws IOException {
-        File input = new File(root, relativePath).getCanonicalFile();
+        File input = fileFor(relativePath).getCanonicalFile();
         if (!input.getCanonicalPath().startsWith(root.getCanonicalPath() + File.separator)) {
             throw new IOException("Path escapes the vault: " + relativePath);
         }
@@ -47,7 +64,7 @@ public class JavaFileSystem implements PkmsFileSystem {
     @Override
     public boolean exists(String relativePath) {
         try {
-            File file = new File(root, relativePath).getCanonicalFile();
+            File file = fileFor(relativePath).getCanonicalFile();
             if (!file.getCanonicalPath().startsWith(root.getCanonicalPath() + File.separator)) {
                 throw new IOException("Path escapes the vault: " + relativePath);
             }
@@ -59,7 +76,7 @@ public class JavaFileSystem implements PkmsFileSystem {
 
     @Override
     public OutputStream openOutput(String relativePath) throws IOException {
-        File destination = new File(root, relativePath).getCanonicalFile();
+        File destination = fileFor(relativePath).getCanonicalFile();
 
         // Containment before mkdirs: a rejected path must not create
         // directories outside the vault
