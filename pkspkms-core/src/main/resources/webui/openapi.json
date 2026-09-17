@@ -82,6 +82,20 @@
         }
       }
     },
+    "/files/manifest": {
+      "get": {
+        "tags": ["files"],
+        "summary": "Per-virtual-vault file manifest",
+        "description": "Groups {filePath, blake3} pairs per virtual-vault alias for pkspkms:// targets. Main-vault rows (vault_alias_id null) are excluded: /cache only serves registered aliases.",
+        "operationId": "filesManifest",
+        "responses": {
+          "200": {
+            "description": "Alias to manifest entries",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ManifestResponse" } } }
+          }
+        }
+      }
+    },
     "/cache/{address}/{location}": {
       "get": {
         "tags": ["vault"],
@@ -183,6 +197,22 @@
           "status": { "type": "string", "enum": ["success"] },
           "file": { "type": "string", "description": "Cached file path relative to the vault" },
           "blake3": { "type": "string", "description": "BLAKE3 hash of the cached file" }
+        }
+      },
+      "ManifestResponse": {
+        "type": "object",
+        "description": "Alias to manifest entries; an alias with no files has an empty array",
+        "additionalProperties": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/ManifestFile" }
+        }
+      },
+      "ManifestFile": {
+        "type": "object",
+        "required": ["filePath"],
+        "properties": {
+          "filePath": { "type": "string", "description": "@alias/-prefixed path" },
+          "blake3": { "type": "string" }
         }
       },
       "Error": {

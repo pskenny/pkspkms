@@ -420,6 +420,33 @@ public class SQLitePksFileRepository implements SqliteRepository {
         }
     }
 
+    @Override
+    public Map<String, Object> manifest() {
+        Map<String, Object> manifest = new LinkedHashMap<>();
+        String sql = "SELECT a.alias, f.file_path, f.blake3 FROM VAULT_ALIASES a "
+                + "LEFT JOIN FILES f ON f.vault_alias_id = a.id ORDER BY a.alias, f.file_path";
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                String alias = rs.getString("alias");
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> files = (List<Map<String, Object>>) manifest.computeIfAbsent(alias, k -> new ArrayList<>());
+                String filePath = rs.getString("file_path");
+                if (filePath == null) {
+                    continue;
+                }
+
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("filePath", filePath);
+                entry.put("blake3", rs.getString("blake3"));
+                files.add(entry);
+            }
+        } catch (SQLException e) {
+            throw new RepositoryException("Failed to build vault manifest", e);
+        }
+        return manifest;
+    }
+
     public void close() {
         if (conn != null) {
             try {

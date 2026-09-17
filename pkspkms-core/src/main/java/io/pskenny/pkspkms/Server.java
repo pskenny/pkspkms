@@ -72,6 +72,8 @@ public class Server extends NanoHTTPD {
             var query = getParam(params, "query");
             res = streamJsonResponse(query, pksFile ->
                     pksFile.filterProperties(List.of("links", "backlinks", "tags", "filePath"), List.of()));
+        } else if ("/files/manifest".equals(uri)) {
+            res = newFixedLengthResponse(Response.Status.OK, "application/json", JsonUtil.mapToJson(repository.manifest()));
         } else if (uri.startsWith("/cache/")) {
             res = handleCacheEndpoint(uri, params);
         } else if ("/webui".equals(uri) || "/webui/".equals(uri)) {

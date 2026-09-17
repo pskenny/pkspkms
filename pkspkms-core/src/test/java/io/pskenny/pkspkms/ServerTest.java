@@ -32,6 +32,7 @@ import static io.pskenny.pkspkms.test.FileUtil.createFile;
 import static io.pskenny.pkspkms.test.FileUtil.readFile;
 import static io.pskenny.pkspkms.test.JsonUtil.assertJsonEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -59,6 +60,20 @@ public class ServerTest {
                         .forEach(java.io.File::delete);
             } catch (IOException e) {
                 throw new RuntimeException("Failed to delete test directory", e);
+            }
+        }
+
+        for (String dir : List.of("manifest-virtual-a", "manifest-virtual-b")) {
+            Path path = Paths.get("target", "test-notes", dir);
+            if (Files.exists(path)) {
+                try (Stream<Path> pathStream = Files.walk(path)) {
+                    pathStream
+                            .sorted(Comparator.reverseOrder())
+                            .map(Path::toFile)
+                            .forEach(java.io.File::delete);
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed to delete test directory", e);
+                }
             }
         }
 
@@ -316,6 +331,56 @@ No links
             assertEquals(Server.SWAGGER_UI_WEBJAR_VERSION, props.getProperty("version"),
                     "Server.SWAGGER_UI_WEBJAR_VERSION and the pom.xml dependency must match");
         }
+    }
+
+    @Test
+    @DisplayName("GET /files/manifest groups virtual-vault files per alias")
+    void testFilesManifestEndpoint() throws IOException, InterruptedException {
+        createFile(TEST_DIR, "main.md", Map.of(), "main vault file");
+        startServer();
+
+        Path virtualA = Paths.get("target", "test-notes", "manifest-virtual-a");
+        Path virtualB = Paths.get("target", "test-notes", "manifest-virtual-b");
+        Files.createDirectories(virtualA);
+        Files.createDirectories(virtualB);
+        createFile(virtualA, "gwern-note.md", Map.of("tags", "g"), "content");
+        createFile(virtualB, "zeta-note.md", Map.of(), "content");
+        app.loadVirtualVault(new JavaFileSystem(virtualA.toFile()), "gwern");
+        app.loadVirtualVault(new JavaFileSystem(virtualB.toFile()), "zeta");
+
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/files/manifest"))
+                .GET()
+                .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), "The /files/manifest endpoint should return HTTP 200 OK.");
+        JsonNode manifest = new ObjectMapper().readTree(response.body());
+        assertTrue(manifest.has("gwern"), "Manifest should group by alias");
+        assertTrue(manifest.has("zeta"), "Manifest should group by alias");
+        assertFalse(manifest.has("main"), "Main-vault rows (no alias) must be excluded");
+
+        JsonNode gwernFiles = manifest.get("gwern");
+        assertEquals(1, gwernFiles.size());
+        assertEquals("@gwern/gwern-note.md", gwernFiles.get(0).get("filePath").asText());
+        assertEquals(64, gwernFiles.get(0).get("blake3").asText().length(), "blake3 should be a full hash");
+    }
+
+    @Test
+    @DisplayName("GET /files/manifest returns an empty object with no virtual vaults")
+    void testFilesManifestEmpty() throws IOException, InterruptedException {
+        startServer();
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/files/manifest"))
+                .GET()
+                .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), "The /files/manifest endpoint should return HTTP 200 OK.");
+        JsonNode manifest = new ObjectMapper().readTree(response.body());
+        assertFalse(manifest.elements().hasNext(), "Manifest should be empty without virtual vaults");
     }
 
     @Disabled("Depth-2 graph traversal not yet implemented")

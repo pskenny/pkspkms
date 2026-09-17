@@ -34,6 +34,12 @@ matches every file. Responses stream JSON:
 Same as `/files/list` but each file is reduced to `filePath`, `links`,
 `backlinks` and `tags` — shaped for graph drawing.
 
+## `/files/manifest`
+
+Groups `{filePath, blake3}` pairs per virtual-vault alias — the
+autocomplete/hydration source for `pkspkms://` targets (Obsidian plugin).
+Main-vault rows are excluded: `/cache` only serves registered aliases.
+
 ## `/cache/{address}/{location}`
 
 Pulls a file from a virtual vault into a cache directory. If not present it

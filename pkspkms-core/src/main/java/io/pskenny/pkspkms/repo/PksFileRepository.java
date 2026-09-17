@@ -36,6 +36,15 @@ public interface PksFileRepository extends AutoCloseable {
 
     Map<String, Object> cacheFile(String address, String location, String cacheDirectory);
 
+    /**
+     * Per-alias {@code {filePath, blake3}} pairs for pkspkms:// targets.
+     * Main-vault rows (vault_alias_id null) are excluded: /cache only serves
+     * registered aliases.
+     */
+    default Map<String, Object> manifest() {
+        return Map.of();
+    }
+
     void createPropertyIndex(String propertyKey, String type);
 
     String getMarkdownFromLuaBase(String luaBaseYaml);

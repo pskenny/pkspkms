@@ -68,6 +68,7 @@ curl GET "http://localhost:23467/files/list" | jq .
 | `GET /files/list?query=<q>` | Query files by property (Lucene-style syntax); empty `query` matches all |
 | `GET /files/search?query=<q>` | Alias of `/files/list` |
 | `GET /files/list/graph?query=<q>` | Same, reduced to `filePath`, `links`, `backlinks`, `tags` |
+| `GET /files/manifest` | Per-virtual-vault `{filePath, blake3}` pairs for `pkspkms://` targets |
 | `GET /webui/` | Browser UI |
 | `GET /cache/{address}/{location}?directory=<dir>` | Copy a file from a virtual vault into the cache directory |
 | `GET /openapi.json` | OpenAPI 3.0 spec (`servers` URL rewritten to the running port) |
