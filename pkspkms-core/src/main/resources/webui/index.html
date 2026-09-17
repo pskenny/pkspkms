@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PKSPKMS</title>
-  <link rel="icon" type="image/png" href="/webui/brain-icon.png">
+  <link rel="icon" type="image/png" href="/webui/pk.png">
   <style>
     :root {
       --bg: #f8f9fa; --fg: #1a1a2e; --card-bg: #ffffff; --card-border: #e1e4e8;
@@ -35,6 +35,8 @@
     header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 2rem; }
     header img { width: 40px; height: 40px; }
     header h1 { font-size: 1.5rem; font-weight: 600; }
+    header .api-link { margin-left: auto; font-size: 0.9rem; font-weight: 500; color: var(--accent); text-decoration: none; }
+    header .api-link:hover { text-decoration: underline; }
 
     .panel details {
       border: 1px solid var(--card-border); border-radius: 8px;
@@ -176,8 +178,9 @@
 <body>
   <div class="container">
     <header>
-      <img src="/webui/brain-icon.png" alt="PKSPKMS">
+      <img src="/webui/pk.png" alt="PKSPKMS">
       <h1>PKSPKMS</h1>
+      <a class="api-link" href="/webui/swagger">API docs</a>
     </header>
 
     <div class="panel">
@@ -186,20 +189,14 @@
         <div class="body">
           <p>Search matches <strong>properties</strong> (YAML frontmatter + generated metadata like <code>links</code>, <code>backlinks</code>, <code>filePath</code>), not full text.</p>
           <p>Use <code>and</code>, <code>or</code>, <code>not</code>, and parentheses to combine conditions.</p>
-          <p><strong>Fields:</strong> any YAML key (e.g. <code>tags</code>, <code>title</code>) plus built-ins <code>filePath</code>, <code>tags</code>, <code>links</code>, <code>backlinks</code>.</p>
-          <p><strong>Operators:</strong> <code>=</code> (or <code>:</code>), <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code>, <code>!=</code>. <code>*</code> is a wildcard.</p>
-          <pre>filePath = *.md
-tags = PKSPKMS
-(tags = PKSPKMS or tags = Development)
-(filePath = Notes/* and filePath = *.md)
-(links = * and not tags = Archive)
-title = *</pre>
-        </div>
-      </details>
-      <details id="settingsDetails">
-        <summary>Settings</summary>
-        <div class="body">
-          <p><strong>Vault path:</strong> <code id="vaultPathDisplay">loading...</code></p>
+          <p><strong>Fields:</strong> any YAML key (e.g. <code>tags</code>, <code>title</code>) plus built-ins <code>filePath</code>, <code>tags</code>, <code>links</code>, <code>backlinks</code>. A bare word searches every property.</p>
+          <p><strong>Syntax:</strong> Lucene-style — <code>field:value</code>, <code>NOT</code> / <code>-field:x</code>, <code>+</code> to require, <code>AND</code>/<code>OR</code>, parentheses, quoted phrases, wildcards <code>* ?</code>, ranges <code>[1 TO 5]</code>.</p>
+          <pre>filePath:*.md
+tags:PKSPKMS
+(tags:PKSPKMS or tags:Development)
+filePath:Notes/* and filePath:*.md
+links:* and not tags:Archive
+"multi word phrase"</pre>
         </div>
       </details>
     </div>
@@ -238,19 +235,6 @@ title = *</pre>
     const PAGE_SIZE = 100;
     const STORAGE_KEY = 'pkspkms_queries';
 
-    // --- Config ---
-    (async function() {
-      try {
-        const res = await fetch('/config');
-        if (res.ok) {
-          const data = await res.json();
-          vaultPath = data.vaultPath || '';
-          const el = document.getElementById('vaultPathDisplay');
-          if (el) el.textContent = vaultPath || 'unknown';
-        }
-      } catch { /* ignore */ }
-    })();
-
     // --- Syntax highlighting ---
     function tokenize(query) {
       const tokens = []; let i = 0;
@@ -266,7 +250,7 @@ title = *</pre>
         if (c === '*') { tokens.push({ type: 'WILD', text: c }); i++; continue; }
         const two = query.slice(i, i + 2);
         if (two === '>=' || two === '<=' || two === '!=') { tokens.push({ type: 'OP', text: two }); i += 2; continue; }
-        if (c === '=' || c === ':' || c === '>' || c === '<') { tokens.push({ type: 'OP', text: c }); i++; continue; }
+        if (c === ':' || c === '>' || c === '<') { tokens.push({ type: 'OP', text: c }); i++; continue; }
         let j = i;
         while (j < query.length && !/[\s()=:<>'"*]/.test(query[j])) j++;
         const word = query.slice(i, j), u = word.toUpperCase();
