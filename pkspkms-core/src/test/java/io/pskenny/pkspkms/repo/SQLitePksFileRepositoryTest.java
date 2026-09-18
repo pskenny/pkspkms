@@ -447,10 +447,14 @@ public class SQLitePksFileRepositoryTest {
     @Test
     void load_excludesPkspkmsCacheDirectory() throws Exception {
         // Cached plugin copies must not be indexed as vault notes (B55-adjacent
-        // Obsidian plugin prerequisite)
+        // Obsidian plugin prerequisite). Covers both the dot-named default and
+        // the plain variant the plugin uses so Obsidian can open the files.
         Files.createDirectories(TEST_DIR.resolve(".pkspkms-cache").resolve("@gwern"));
         Files.writeString(TEST_DIR.resolve(".pkspkms-cache").resolve("@gwern").resolve("java.md"),
                 "---\ntags:\n  - Java\n---\ncached copy");
+        Files.createDirectories(TEST_DIR.resolve("pkspkms-cache").resolve("@scy"));
+        Files.writeString(TEST_DIR.resolve("pkspkms-cache").resolve("@scy").resolve("rust.md"),
+                "---\ntags:\n  - Rust\n---\ncached copy");
         createFile(TEST_DIR, "keep.md", Map.of(), "");
 
         try (SQLitePksFileRepository repository = new SQLitePksFileRepository(DB_URL, null, new JavaFileSystem(TEST_DIR.toFile()))) {

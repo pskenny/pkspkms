@@ -3,6 +3,8 @@ package io.pskenny.pkspkms;
 import io.pskenny.pkspkms.desktop.LogCapture;
 import io.pskenny.pkspkms.desktop.TrayFactory;
 import io.pskenny.pkspkms.desktop.TrayManager;
+import io.pskenny.pkspkms.io.feed.FeedParser;
+import io.pskenny.pkspkms.io.feed.SyndicationVaults;
 import io.pskenny.pkspkms.io.fs.JavaFileSystem;
 import io.pskenny.pkspkms.io.fs.PkmsFileSystem;
 import io.pskenny.pkspkms.repo.sqlite.SQLitePksFileRepository;
@@ -105,6 +107,12 @@ public final class Application {
                     }
                 }
 
+                // OPML vaults (outliner + xmlUrl subscriptions) and feed vaults
+                // (RSS/Atom/podcast) — read-only peers; a dead feed logs and
+                // continues so it can never block startup
+                mountSyndicationVaults(ns, server, "opml_vault", true);
+                mountSyndicationVaults(ns, server, "feed_vault", false);
+
                 server.start();
                 logger.info("Server started on http://localhost:{}", port);
 
@@ -187,6 +195,46 @@ public final class Application {
         }
     }
 
+    // Mounts one syndication vault flag's entries: 'alias:<url-or-file>'.
+    // Per-entry try/catch: failures log and skip, never block startup.
+    private void mountSyndicationVaults(Namespace ns, Server server, String flag, boolean requireOpml) {
+        List<String> specs = ns.get(flag);
+        if (specs == null) {
+            return;
+        }
+
+        for (String spec : specs) {
+            try {
+                String[] parts = spec.split(":", 2);
+                if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
+                    throw new IllegalArgumentException("Invalid format: " + spec + ". Expected: alias:<source>");
+                }
+                String alias = parts[0];
+                String source = parts[1];
+
+                PkmsFileSystem vaultFs;
+                if (source.startsWith("http://") || source.startsWith("https://")) {
+                    vaultFs = SyndicationVaults.forUrl(source);
+                } else {
+                    Path sourcePath = Paths.get(source);
+                    if (!Files.isRegularFile(sourcePath)) {
+                        throw new IllegalArgumentException("Not a file: " + source);
+                    }
+                    byte[] bytes = Files.readAllBytes(sourcePath);
+                    if (requireOpml && !FeedParser.isOpml(bytes)) {
+                        throw new IllegalArgumentException("Not an OPML file: " + source);
+                    }
+                    vaultFs = SyndicationVaults.forBytes(bytes, Files.getLastModifiedTime(sourcePath).toMillis());
+                }
+
+                server.loadVirtualVault(vaultFs, alias);
+                logger.info("Mounted {} vault: @{} -> {}", requireOpml ? "OPML" : "feed", alias, source);
+            } catch (IOException | IllegalArgumentException | io.pskenny.pkspkms.repo.RepositoryException e) {
+                logger.error("Failed to mount {} vault '{}', skipping: {}", requireOpml ? "OPML" : "feed", spec, e.getMessage());
+            }
+        }
+    }
+
     private Namespace parseArguments(String[] args) {
         ArgumentParser parser = ArgumentParsers.newFor("pkspkms").build()
                 .description("PKSPKMS program");
@@ -229,6 +277,14 @@ public final class Application {
                 .type(String.class)
                 .action(Arguments.append())
                 .help("Virtual vault in 'alias:/path/to/vault' format (repeatable)");
+        serverParser.addArgument("--opml-vault")
+                .type(String.class)
+                .action(Arguments.append())
+                .help("Virtual vault from an OPML file in 'alias:/path/file.opml' format (repeatable)");
+        serverParser.addArgument("--feed-vault")
+                .type(String.class)
+                .action(Arguments.append())
+                .help("Virtual vault from a feed in 'alias:<url-or-file>' format (repeatable)");
     }
 
     private void addExportSubparser(Subparsers subparsers) {

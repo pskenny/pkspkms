@@ -7,7 +7,7 @@ Reflects the codebase as of 2026-09-09. Known deviations from these ideals are t
 - **`pkspkms-core`** — library: domain objects, parsers, query engine, repository, HTTP server, Bases rendering
 - **`pkspkms-desktop`** — executable: CLI (`Application`), system tray (`TrayManager`, `TrayFactory`), and `SQLiteLuaConnector`
 
-`SQLiteLuaConnector` lives in desktop, not core: it registers the `lua_eval` SQLite function via `org.sqlite.Function`, and core declares `sqlite-jdbc` test-scoped so an Android app can consume core with its own driver. Core accepts a `Consumer<Connection>` registrar instead — without one, Lua-backed Bases queries are skipped. `TrayFactory` builds the tray on a worker thread with a 5-second timeout: tray initialization can block indefinitely (dorkbox desktop-detection subprocess), so a stalled tray degrades the app headless instead of hanging startup (B55).
+`SQLiteLuaConnector` lives in desktop, not core: it registers the `lua_eval` SQLite function via `org.sqlite.Function`, and core declares `sqlite-jdbc` test-scoped so an Android app can consume core with its own driver. Core accepts a `Consumer<Connection>` registrar instead — without one, Lua-backed Bases queries are skipped. `TrayFactory` builds the tray on a worker thread with a 5-second timeout: tray initialization can block indefinitely (dorkbox desktop-detection subprocess), so a stalled tray degrades the app headless instead of hanging startup (B55). `io/fs` is the filesystem plumbing (disk, plus `SynthesizedFileSystem` for read-only in-memory vaults); `io/feed` mounts OPML outlines and RSS/Atom/podcast feeds as virtual vaults — fetched once at server start, per-vault failures log and skip.
 
 ## Load pipeline
 

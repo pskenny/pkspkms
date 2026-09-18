@@ -7,6 +7,8 @@ What PKSPKMS does. Architecture: ARCHITECTURE.md · Known bugs: BUGS.md
 - Incremental: mtime diff, changed files only; parallel parsing (2x cores, max 16)
 - Blake3 content hashes — binaries are stream-hashed, never materialized in memory
 - Virtual vaults: `--virtual-vault alias:/path` mounts extra directories as `@alias/`-prefixed paths
+- OPML vaults: `--opml-vault alias:file.opml` — outliner notes per node, `xmlUrl` outlines mounted as fetched feeds (mixed trees allowed)
+- Feed vaults: `--feed-vault alias:<url-or-file>` — RSS 2.0, Atom 1.0 and podcast feeds as read-only vaults (channel note + date-prefixed item notes, `media:` for enclosures); fetched once per server start, failures degrade per vault
 - Obsidian compatibility: `.obsidian/types.json` property types drive comparisons;
   tab-indented YAML tolerated
 - Obsidian Excluded files honored: `.obsidian/app.json` `userIgnoreFilters` drive

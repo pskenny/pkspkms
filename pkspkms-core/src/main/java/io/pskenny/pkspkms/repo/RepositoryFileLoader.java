@@ -40,9 +40,11 @@ public final class RepositoryFileLoader {
     private static final int PARSE_THREADS =
             Math.min(2 * Runtime.getRuntime().availableProcessors(), 16);
 
-    // System dirs are never indexed (.pkspkms-cache holds the plugin's cached
-    // copies); everything else follows Obsidian's Excluded files list
-    private static final List<String> ALWAYS_EXCLUDED = List.of(".trash", ".obsidian", ".pkspkms-cache");
+    // System dirs are never indexed (.pkspkms-cache/.pkspkms-cache hold the
+    // plugin's cached copies, dot-named and plain); everything else follows
+    // Obsidian's Excluded files list
+    private static final List<String> ALWAYS_EXCLUDED =
+            List.of(".trash", ".obsidian", ".pkspkms-cache", "pkspkms-cache");
 
     public void load() throws IOException, SQLException {
         // 1. Walk the filesystem to collect all candidate file entries.

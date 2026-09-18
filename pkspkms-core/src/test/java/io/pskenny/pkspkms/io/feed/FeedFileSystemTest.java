@@ -1,0 +1,106 @@
+package io.pskenny.pkspkms.io.feed;
+
+import com.sun.net.httpserver.HttpServer;
+import io.pskenny.pkspkms.io.fs.SynthesizedFileSystem.SynthFile;
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+public class FeedFileSystemTest {
+
+    private static final String RSS = """
+            <rss version="2.0"><channel>
+              <title>CoRecursive Podcast</title>
+              <link>https://corecursive.com/</link>
+              <description>Software dev podcast</description>
+              <item>
+                <title>Show notes</title>
+                <link>https://corecursive.com/ep1</link>
+                <pubDate>Tue, 01 Jul 2025 10:30:00 GMT</pubDate>
+                <enclosure url="https://cdn/ep1.mp3" length="100" type="audio/mpeg"/>
+              </item>
+              <item><title>Duplicate</title></item>
+              <item><title>Duplicate</title></item>
+            </channel></rss>
+            """;
+
+    @Test
+    void laysOutChannelNoteAndDatePrefixedItems() throws Exception {
+        FeedFileSystem fs = new FeedFileSystem(RSS.getBytes(StandardCharsets.UTF_8), "https://corecursive.com/rss", 1000L);
+
+        List<String> paths = fs.listFiles(List.of()).stream().map(e -> e.relativePath()).toList();
+        assertEquals(List.of(
+                "CoRecursive Podcast.md",
+                "CoRecursive Podcast/2025-07-01 Show notes.md",
+                "CoRecursive Podcast/Duplicate-2.md",
+                "CoRecursive Podcast/Duplicate.md"), paths, "channel note + items nested under the feed, collision dedupe");
+
+        SynthFile channel = resolve(fs, "CoRecursive Podcast.md");
+        assertTrue(channel.content().contains("title: \"CoRecursive Podcast\""), "channel title");
+        assertTrue(channel.content().contains("url: \"https://corecursive.com/\""), "channel url");
+        assertTrue(channel.content().contains("rss: \"https://corecursive.com/rss\""), "channel rss source");
+        assertTrue(channel.content().contains("description: \"Software dev podcast\""), "channel description");
+
+        SynthFile item = resolve(fs, "CoRecursive Podcast/2025-07-01 Show notes.md");
+        assertTrue(item.content().contains("title: \"Show notes\""));
+        assertTrue(item.content().contains("url: \"https://corecursive.com/ep1\""));
+        assertTrue(item.content().contains("published: \"2025-07-01T10:30:00Z\""));
+        assertTrue(item.content().contains("media: \"https://cdn/ep1.mp3\""), "podcast enclosure -> media property");
+
+        SynthFile undated = resolve(fs, "CoRecursive Podcast/Duplicate.md");
+        assertTrue(undated.content().startsWith("---\ntitle: \"Duplicate\"\n"), "no date -> no prefix");
+        assertTrue(fs.exists("CoRecursive Podcast/Duplicate-2.md"), "collisions deduped");
+    }
+
+    @Test
+    void readsWriteThrows() throws Exception {
+        FeedFileSystem fs = new FeedFileSystem(RSS.getBytes(StandardCharsets.UTF_8), null, 42L);
+
+        SynthFile channel = resolve(fs, "CoRecursive Podcast.md");
+        assertEquals(42L, channel.mtime(), "caller-supplied mtime drives incremental loads");
+
+        assertThrows(UnsupportedOperationException.class, () -> fs.writeString("x.md", "y"));
+        assertThrows(UnsupportedOperationException.class, () -> fs.openOutput("x.md"));
+        assertTrue(!fs.exists("nope.md"));
+    }
+
+    @Test
+    void fetchesOverHttp() throws Exception {
+        HttpServer server = HttpServer.create(new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), 0), 0);
+        byte[] body = RSS.getBytes(StandardCharsets.UTF_8);
+        server.createContext("/feed.xml", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/rss+xml");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            FeedFileSystem fs = new FeedFileSystem(
+                    FeedFetcher.httpGet("http://localhost:" + server.getAddress().getPort() + "/feed.xml"),
+                    "https://corecursive.com/rss",
+                    System.currentTimeMillis());
+            assertTrue(fs.exists("CoRecursive Podcast.md"), "fetched feed materializes the channel note");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private static SynthFile resolve(FeedFileSystem fs, String path) throws IOException {
+        // mtime comes from the listed entry; content from openInput
+        var entry = fs.listFiles(List.of()).stream()
+                .filter(e -> e.relativePath().equals(path))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Missing synthesized file: " + path));
+        try (java.io.InputStream in = fs.openInput(path)) {
+            return new SynthFile(new String(in.readAllBytes(), StandardCharsets.UTF_8), entry.lastModified());
+        }
+    }
+}
