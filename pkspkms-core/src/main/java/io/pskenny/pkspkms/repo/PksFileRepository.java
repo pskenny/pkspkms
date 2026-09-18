@@ -15,6 +15,9 @@ public interface PksFileRepository extends AutoCloseable {
 
     void loadVirtualVault(PkmsFileSystem aliasFs, String alias);
 
+    /** Renders base/luabase embeds; call once after all vaults have loaded. */
+    default void processEmbeds() {}
+
     List<PksFile> searchRegular(CompiledQuery query);
 
     /** Property types declared in the vault's .obsidian/types.json; empty when unknown. */

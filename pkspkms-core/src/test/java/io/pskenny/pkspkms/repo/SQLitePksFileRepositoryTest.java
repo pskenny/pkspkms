@@ -24,12 +24,14 @@ import static org.junit.jupiter.api.Assertions.*;
 public class SQLitePksFileRepositoryTest {
 
     private static final Path TEST_DIR = Paths.get("target", "test-notes", SQLitePksFileRepositoryTest.class.getSimpleName());
+    private static final Path VIRTUAL_DIR = Paths.get("target", "test-notes", SQLitePksFileRepositoryTest.class.getSimpleName() + "-virtual");
     private static final String TEST_DB_PATH = "test_pks.db";
     private static final String DB_URL = "jdbc:sqlite:" + TEST_DB_PATH;
 
     @BeforeEach
     void setUp() throws IOException {
         Files.deleteIfExists(Path.of(TEST_DB_PATH));
+        Files.createDirectories(VIRTUAL_DIR);
         try {
             Files.createDirectories(TEST_DIR);
         } catch (IOException ignored) {}
@@ -39,14 +41,16 @@ public class SQLitePksFileRepositoryTest {
     void tearDown() throws IOException {
         Files.deleteIfExists(Path.of(TEST_DB_PATH));
 
-        if (Files.exists(TEST_DIR)) {
-            try (Stream<Path> pathStream = Files.walk(TEST_DIR)) {
-                pathStream
-                        .sorted(Comparator.reverseOrder())
-                        .map(Path::toFile)
-                        .forEach(java.io.File::delete);
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to delete test directory", e);
+        for (Path dir : new Path[]{TEST_DIR, VIRTUAL_DIR}) {
+            if (Files.exists(dir)) {
+                try (Stream<Path> pathStream = Files.walk(dir)) {
+                    pathStream
+                            .sorted(Comparator.reverseOrder())
+                            .map(Path::toFile)
+                            .forEach(java.io.File::delete);
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed to delete test directory", e);
+                }
             }
         }
     }
@@ -467,6 +471,38 @@ public class SQLitePksFileRepositoryTest {
                     paths.add(rs.getString("file_path"));
                 }
                 assertEquals(List.of("keep.md"), paths);
+            }
+        }
+    }
+
+    @Test
+    void loadVirtualVault_defersEmbedRenderingToProcessEmbeds() throws Exception {
+        // Embed rendering is global over all vaults, so it must run once after
+        // every vault mounts — a mount only seeds EMBEDS rows
+        createFile(TEST_DIR, "keep.md", Map.of(), "");
+        createFile(VIRTUAL_DIR, "note.md", Map.of(), """
+                ```luabase
+                views:
+                  - type: list
+                ```
+                """);
+
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository(DB_URL, null, new JavaFileSystem(TEST_DIR.toFile()))) {
+            repository.loadDirectoryIntoRepository();
+            repository.loadVirtualVault(new JavaFileSystem(VIRTUAL_DIR.toFile()), "gwern");
+
+            try (Statement stmt = repository.getConnection().createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT generated_content FROM EMBEDS WHERE type = 'luabase'")) {
+                assertTrue(rs.next(), "virtual vault base seeded");
+                assertNull(rs.getString("generated_content"), "a mount must not render embeds");
+            }
+
+            repository.processEmbeds();
+
+            try (Statement stmt = repository.getConnection().createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT generated_content FROM EMBEDS WHERE type = 'luabase'")) {
+                assertTrue(rs.next());
+                assertNotNull(rs.getString("generated_content"), "explicit processEmbeds renders");
             }
         }
     }

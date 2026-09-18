@@ -113,6 +113,9 @@ public final class Application {
                 mountSyndicationVaults(ns, server, "opml_vault", true);
                 mountSyndicationVaults(ns, server, "feed_vault", false);
 
+                // Embeds render once, over the full corpus of every mounted vault
+                server.processEmbeds();
+
                 server.start();
                 logger.info("Server started on http://localhost:{}", port);
 

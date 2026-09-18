@@ -161,6 +161,10 @@ public class Server extends NanoHTTPD {
         repository.loadDirectoryIntoRepository();
     }
 
+    public void processEmbeds() {
+        repository.processEmbeds();
+    }
+
     // Spec served with the running port so Swagger UI Try-it-out hits the right origin
     private Response serveOpenApi() {
         try (InputStream in = getClass().getResourceAsStream(OPENAPI_RESOURCE)) {

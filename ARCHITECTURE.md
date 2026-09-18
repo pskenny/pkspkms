@@ -25,10 +25,10 @@ Application (CLI)
             │      other -> Blake3 stream-hash only (binaries never materialize)
             └─ 6. serial on one connection:
                    insertFiles -> resolveWikilinks -> updatePropertiesAndLinks
-       └─ SqliteEmbedProcessor.processAll()   (render ```base / ```luabase embeds)
+       └─ SqliteEmbedProcessor.processAll()   (render ```base / ```luabase embeds — once, after every vault mounts)
 ```
 
-Everything touching SQLite is serial on a single JDBC connection (SQLite is single-writer, even in WAL). Only parse/hash runs in parallel — it has no shared mutable state. The DB is a disposable cache today: tables are dropped and recreated on every repository construction (BUGS.md B8), so every load is a full rescan.
+Everything touching SQLite is serial on a single JDBC connection (SQLite is single-writer, even in WAL). Only parse/hash runs in parallel — it has no shared mutable state. The DB is a disposable cache today: tables are dropped and recreated on every repository construction (BUGS.md B8), so every load is a full rescan. Embed rendering is global across vaults: vault mounts only seed EMBEDS rows, and `processEmbeds()` runs once after the full mount sequence so a luabase always filters over the complete corpus.
 
 ## Query language -> SQL
 

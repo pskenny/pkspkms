@@ -111,11 +111,22 @@ public class SQLitePksFileRepository implements SqliteRepository {
             logger.info("Loading vault {} (id {})", alias, aliasId);
             aliasFilesystems.put(alias, aliasFs);
             new RepositoryFileLoader(this, aliasFs, alias).load();
-            sqliteEmbedProcessor.processAll();
+            // No embed rendering here: processAll is global over all vaults and
+            // must run once after every vault mounts (see processEmbeds)
         } catch (IOException e) {
             throw new RepositoryException("Failed to load virtual vault: " + alias, e);
         } catch (SQLException e) {
             throw new RepositoryException("Failed to load virtual vault: " + alias, e);
+        }
+    }
+
+    // Renders base/luabase embeds across every vault. Application calls this
+    // once after all vaults mount; each vault load only seeds EMBEDS rows.
+    public void processEmbeds() {
+        try {
+            sqliteEmbedProcessor.processAll();
+        } catch (SQLException | IOException e) {
+            throw new RepositoryException("Failed to process embeds", e);
         }
     }
 
