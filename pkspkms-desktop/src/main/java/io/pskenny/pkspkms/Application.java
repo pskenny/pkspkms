@@ -3,8 +3,8 @@ package io.pskenny.pkspkms;
 import io.pskenny.pkspkms.desktop.LogCapture;
 import io.pskenny.pkspkms.desktop.TrayFactory;
 import io.pskenny.pkspkms.desktop.TrayManager;
-import io.pskenny.pkspkms.io.feed.FeedParser;
-import io.pskenny.pkspkms.io.feed.SyndicationVaults;
+import io.pskenny.pkspkms.io.feed.FeedCollectionFileSystem;
+import io.pskenny.pkspkms.io.feed.FeedFetcher;
 import io.pskenny.pkspkms.io.fs.JavaFileSystem;
 import io.pskenny.pkspkms.io.fs.PkmsFileSystem;
 import io.pskenny.pkspkms.repo.sqlite.SQLitePksFileRepository;
@@ -23,7 +23,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 
 public final class Application {
@@ -110,8 +113,11 @@ public final class Application {
                 // OPML vaults (outliner + xmlUrl subscriptions) and feed vaults
                 // (RSS/Atom/podcast) — read-only peers; a dead feed logs and
                 // continues so it can never block startup
-                mountSyndicationVaults(ns, server, "opml_vault", true);
-                mountSyndicationVaults(ns, server, "feed_vault", false);
+                // OPML vaults (outliner + xmlUrl subscriptions) and feed vaults
+                // (RSS/Atom/podcast) — read-only peers. Sources group by alias:
+                // repeated entries with the same alias share one namespace and
+                // a dead source warns and skips instead of killing the vault.
+                mountSyndicationVaults(ns, server);
 
                 // Embeds render once, over the full corpus of every mounted vault
                 server.processEmbeds();
@@ -198,43 +204,45 @@ public final class Application {
         }
     }
 
-    // Mounts one syndication vault flag's entries: 'alias:<url-or-file>'.
-    // Per-entry try/catch: failures log and skip, never block startup.
-    private void mountSyndicationVaults(Namespace ns, Server server, String flag, boolean requireOpml) {
+    // Mounts the --opml-vault/--feed-vault entries. Sources group by alias
+    // ('alias:<url-or-file>' — repeatable), and each source fetches through
+    // FeedCollectionFileSystem: per-source failures warn and skip, so one
+    // dead feed never costs the whole alias. Startup never blocks on a feed.
+    private void mountSyndicationVaults(Namespace ns, Server server) {
+        Map<String, List<String>> byAlias = new LinkedHashMap<>();
+        collectSources(ns, "opml_vault", byAlias);
+        collectSources(ns, "feed_vault", byAlias);
+
+        for (Map.Entry<String, List<String>> entry : byAlias.entrySet()) {
+            String alias = entry.getKey();
+            try {
+                FeedCollectionFileSystem vaultFs = new FeedCollectionFileSystem(entry.getValue(), FeedFetcher.loader());
+                if (vaultFs.isEmpty()) {
+                    logger.error("No sources mounted for vault '@{}', skipping", alias);
+                    continue;
+                }
+
+                server.loadVirtualVault(vaultFs, alias);
+                logger.info("Mounted syndication vault: @{} -> {}", alias, entry.getValue());
+            } catch (IOException | IllegalArgumentException | io.pskenny.pkspkms.repo.RepositoryException e) {
+                logger.error("Failed to mount vault '@{}', skipping: {}", alias, e.getMessage());
+            }
+        }
+    }
+
+    private void collectSources(Namespace ns, String flag, Map<String, List<String>> byAlias) {
         List<String> specs = ns.get(flag);
         if (specs == null) {
             return;
         }
 
         for (String spec : specs) {
-            try {
-                String[] parts = spec.split(":", 2);
-                if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
-                    throw new IllegalArgumentException("Invalid format: " + spec + ". Expected: alias:<source>");
-                }
-                String alias = parts[0];
-                String source = parts[1];
-
-                PkmsFileSystem vaultFs;
-                if (source.startsWith("http://") || source.startsWith("https://")) {
-                    vaultFs = SyndicationVaults.forUrl(source);
-                } else {
-                    Path sourcePath = Paths.get(source);
-                    if (!Files.isRegularFile(sourcePath)) {
-                        throw new IllegalArgumentException("Not a file: " + source);
-                    }
-                    byte[] bytes = Files.readAllBytes(sourcePath);
-                    if (requireOpml && !FeedParser.isOpml(bytes)) {
-                        throw new IllegalArgumentException("Not an OPML file: " + source);
-                    }
-                    vaultFs = SyndicationVaults.forBytes(bytes, Files.getLastModifiedTime(sourcePath).toMillis());
-                }
-
-                server.loadVirtualVault(vaultFs, alias);
-                logger.info("Mounted {} vault: @{} -> {}", requireOpml ? "OPML" : "feed", alias, source);
-            } catch (IOException | IllegalArgumentException | io.pskenny.pkspkms.repo.RepositoryException e) {
-                logger.error("Failed to mount {} vault '{}', skipping: {}", requireOpml ? "OPML" : "feed", spec, e.getMessage());
+            String[] parts = spec.split(":", 2);
+            if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
+                logger.error("Invalid vault format '{}', skipping. Expected: alias:<source>", spec);
+                continue;
             }
+            byAlias.computeIfAbsent(parts[0], key -> new ArrayList<>()).add(parts[1]);
         }
     }
 

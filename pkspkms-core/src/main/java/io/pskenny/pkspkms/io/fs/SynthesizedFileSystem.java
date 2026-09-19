@@ -29,6 +29,11 @@ public abstract class SynthesizedFileSystem implements PkmsFileSystem {
         this.files = new TreeMap<>(files);
     }
 
+    /** True when nothing materialized — callers skip registering such vaults. */
+    public boolean isEmpty() {
+        return files.isEmpty();
+    }
+
     @Override
     public List<PkmsEntry> listFiles(List<String> excludedDirectories) throws IOException {
         List<PkmsEntry> entries = new ArrayList<>();

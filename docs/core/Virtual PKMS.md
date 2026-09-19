@@ -40,11 +40,15 @@ still mounts.
 ## Feed vaults
 
 Mount a single syndication feed — RSS 2.0, Atom 1.0, or a podcast feed — by
-URL or local file:
+URL or local file. Entries group by alias: repeat the flag with the same
+alias to mount several feeds under one namespace, and failures are per
+source — a dead feed warns and skips while the rest mount:
 
 ```shell
 pkspkms server --directory "/pkms/" --feed-vault "corecursive:https://corecursive.com/rss"
 pkspkms server --directory "/pkms/" --feed-vault "local:/path/to/feed.xml"
+# one alias, many sources (same-titled feeds rename Blog -> Blog-2)
+pkspkms server --directory "/pkms/" --feed-vault "scy:https://feedA" --feed-vault "scy:https://feedB"
 ```
 
 Each feed materializes as a channel note (with `rss:` frontmatter, like your

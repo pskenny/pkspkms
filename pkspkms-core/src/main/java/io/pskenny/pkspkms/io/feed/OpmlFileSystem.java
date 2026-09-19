@@ -4,8 +4,6 @@ import io.pskenny.pkspkms.io.PathUtil;
 import io.pskenny.pkspkms.io.fs.SynthesizedFileSystem;
 import io.pskenny.pkspkms.io.fs.SynthesizedFileSystem.SynthFile;
 import io.pskenny.pkspkms.io.feed.FeedFetcher.FeedLoader;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
@@ -16,23 +14,17 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 
 /**
  * Read-only vault over an OPML file. Outliner outlines (text/_note, htmlUrl)
  * become one note per node; outlines carrying xmlUrl become feed subscriptions
- * — fetched in parallel (4 threads) and mounted (channel note + item notes)
- * under the node's own path. Mixed trees are allowed. A subscription that
- * fails to fetch or parse logs a warning and is skipped — large exports
+ * — fetched in parallel via {@link Mounts} and mounted (channel note + item
+ * notes) under the node's own path. Mixed trees are allowed. A subscription
+ * that fails to fetch or parse logs a warning and is skipped — large exports
  * (NewsBlur, AntennaPod) mount even when individual feeds are dead. Outliner
  * notes carry the OPML file's mtime, so unchanged files skip re-parsing.
  */
 public final class OpmlFileSystem extends SynthesizedFileSystem {
-
-    private static final Logger logger = LoggerFactory.getLogger(OpmlFileSystem.class);
-    private static final int SUBSCRIPTION_POOL = 4;
 
     public OpmlFileSystem(Path opmlFile, FeedLoader feedLoader) throws IOException {
         this(Files.readAllBytes(opmlFile), fileMtime(opmlFile), feedLoader);
@@ -49,7 +41,8 @@ public final class OpmlFileSystem extends SynthesizedFileSystem {
     // One subscription: feed URL plus the path it mounts under
     private record Subscription(String xmlUrl, String here) {}
 
-    private static Map<String, SynthFile> materialize(byte[] opmlBytes, long mtime, FeedLoader feedLoader) throws IOException {
+    // Package-visible: FeedCollectionFileSystem inlines OPML sources too
+    static Map<String, SynthFile> materialize(byte[] opmlBytes, long mtime, FeedLoader feedLoader) throws IOException {
         Document document = Xml.parse(opmlBytes);
         Element body = Xml.first(Xml.root(document), "body");
         if (body == null) {
@@ -98,33 +91,16 @@ public final class OpmlFileSystem extends SynthesizedFileSystem {
         }
     }
 
-    // Parallel over a small pool: a big export mounts in roughly the slowest
-    // feed's time. Dead feeds warn and skip instead of aborting the vault.
+    // Dead feeds warn and skip instead of aborting the vault (Mounts skips per task)
     private static void mountSubscriptions(List<Subscription> subscriptions, Map<String, SynthFile> files, FeedLoader feedLoader) throws IOException {
-        if (subscriptions.isEmpty()) {
-            return;
-        }
-
-        ExecutorService pool = Executors.newFixedThreadPool(SUBSCRIPTION_POOL);
-        try {
-            List<Future<Map<String, SynthFile>>> futures = new ArrayList<>();
-            for (Subscription subscription : subscriptions) {
-                futures.add(pool.submit(() -> fetchSubscription(subscription, feedLoader)));
+        List<Map<String, SynthFile>> mounted = Mounts.fetch(
+                subscriptions,
+                Subscription::xmlUrl,
+                subscription -> fetchSubscription(subscription, feedLoader));
+        for (Map<String, SynthFile> subscriptionFiles : mounted) {
+            if (subscriptionFiles != null) {
+                files.putAll(subscriptionFiles);
             }
-
-            for (int i = 0; i < futures.size(); i++) {
-                Subscription subscription = subscriptions.get(i);
-                try {
-                    files.putAll(futures.get(i).get());
-                } catch (java.util.concurrent.ExecutionException e) {
-                    logger.warn("Skipping feed {}: {}", subscription.xmlUrl(), e.getCause().getMessage());
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new IOException("Interrupted while fetching feeds", e);
-                }
-            }
-        } finally {
-            pool.shutdown();
         }
     }
 

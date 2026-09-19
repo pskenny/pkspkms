@@ -18,7 +18,8 @@ public final class FeedFileSystem extends SynthesizedFileSystem {
         super(materialize(feedBytes, feedUrl, mtime));
     }
 
-    private static Map<String, SynthFile> materialize(byte[] feedBytes, String feedUrl, long mtime) throws IOException {
+    // Package-visible: FeedCollectionFileSystem inlines feed sources
+    static Map<String, SynthFile> materialize(byte[] feedBytes, String feedUrl, long mtime) throws IOException {
         Feed feed = FeedParser.parse(feedBytes);
         String feedDir = PathUtil.safeFileName(feed.title());
         return FeedNotes.materialize(feed, feedDir + ".md", feedDir, feedUrl, mtime);
