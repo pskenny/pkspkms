@@ -8,7 +8,7 @@ What PKSPKMS does. Architecture: ARCHITECTURE.md · Known bugs: BUGS.md
 - Blake3 content hashes — binaries are stream-hashed, never materialized in memory
 - Virtual vaults: `--virtual-vault alias:/path` mounts extra directories as `@alias/`-prefixed paths
 - OPML vaults: `--opml-vault alias:file.opml` — outliner notes per node, `xmlUrl` outlines mounted as fetched feeds (mixed trees allowed)
-- Feed vaults: `--feed-vault alias:<url-or-file>` — RSS 2.0, Atom 1.0 and podcast feeds as read-only vaults (channel note + date-prefixed item notes); items carry tags/seconds/episode/season/image/comments/guid, channels language/modified/tags/website/image, audio-video enclosures embed as `![]()` and YouTube item links embed a normalized player; entries group by alias and failures degrade per source
+- Feed vaults: `--feed-vault alias:<url-or-file>` — RSS 2.0, Atom 1.0 and podcast feeds as read-only vaults (channel note + date-prefixed item notes); items carry tags/seconds/episode/season/image/comments/guid, channels language/modified/tags/website/image, audio-video enclosures embed as `![]()` and YouTube item links embed a normalized player; entries group by alias and failures degrade per source; per-host adaptive backoff honors Retry-After (2 retries) so subscription bursts aren't rate limited
 - Obsidian compatibility: `.obsidian/types.json` property types drive comparisons;
   tab-indented YAML tolerated
 - Obsidian Excluded files honored: `.obsidian/app.json` `userIgnoreFilters` drive

@@ -66,9 +66,13 @@ renders a player; items whose `url` is a YouTube link (watch, youtu.be,
 shorts) embed a normalized `![](https://www.youtube.com/watch?v=…)` player.
 Nothing is downloaded.
 
-Feeds are fetched once per server start and 301-style redirects
+downloaded. Feeds are fetched once per server start and 301-style redirects
 (http → https) are followed; a feed that fails to fetch or parse logs an
-error and the vault is skipped — the server keeps running. These vaults are
+error and the vault is skipped — the server keeps running. Fetching adapts
+per host: request spacing starts at zero and backs off when a host answers
+429/503 (honoring `Retry-After`, retrying twice before giving up on that
+feed), then recovers on success — large subscription bursts mount without
+being rate limited. These vaults are
 read-only: the `/cache` endpoint copies items into your vault as usual.
 
 > [!NOTE] These flags are separate from `--virtual-vault` because URLs contain
