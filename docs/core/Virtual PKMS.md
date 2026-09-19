@@ -62,7 +62,9 @@ episodes), `episode`, `season`, `image`, `comments`, `commentsCount`, `guid`;
 channel notes gain `language`, `modified`, channel-level `tags`, `website`
 and `image`. Audio/video enclosures (by MIME type, falling back to file
 extension) embed at the top of the note body as `![](url)` so Obsidian
-renders a player; nothing is downloaded.
+renders a player; items whose `url` is a YouTube link (watch, youtu.be,
+shorts) embed a normalized `![](https://www.youtube.com/watch?v=…)` player.
+Nothing is downloaded.
 
 Feeds are fetched once per server start and 301-style redirects
 (http → https) are followed; a feed that fails to fetch or parse logs an

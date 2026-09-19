@@ -153,6 +153,41 @@ public class FeedFileSystemTest {
         assertTrue(channel.contains("image: \"https://cdn/cover.jpg\""));
     }
 
+    @Test
+    void youtubeItemUrlEmbedsInBody() throws Exception {
+        String rss = """
+                <rss version="2.0"><channel><title>Vids</title>
+                  <item><title>Watch</title><link>https://www.youtube.com/watch?v=dQw4w9WgXcQ&amp;list=xyz</link></item>
+                  <item><title>Shorts</title><link>https://www.youtube.com/shorts/abc_-9xyz</link></item>
+                  <item><title>Shortlink</title><link>https://youtu.be/xyz_-987abc</link></item>
+                  <item><title>Plain</title><link>https://example.com/watch?v=dQw4w9WgXcQ</link></item>
+                  <item><title>Both</title><link>https://www.youtube.com/watch?v=abc12345678</link>
+                    <enclosure url="https://cdn/x.mp3" type="audio/mpeg"/></item>
+                </channel></rss>
+                """;
+        FeedFileSystem fs = new FeedFileSystem(rss.getBytes(StandardCharsets.UTF_8), null, 3L);
+
+        String watch = new String(fs.openInput("Vids/Watch.md").readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(watch.contains("\n![](https://www.youtube.com/watch?v=dQw4w9WgXcQ)\n"), "watch URL embeds");
+        assertTrue(watch.contains("url: \"https://www.youtube.com/watch?v=dQw4w9WgXcQ&amp;list=xyz\"")
+                || watch.contains("&list=xyz"), "frontmatter url keeps the original link");
+
+        String shorts = new String(fs.openInput("Vids/Shorts.md").readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(shorts.contains("![](https://www.youtube.com/watch?v=abc_-9xyz)"), "shorts normalize to watch URLs");
+
+        String shortlink = new String(fs.openInput("Vids/Shortlink.md").readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(shortlink.contains("![](https://www.youtube.com/watch?v=xyz_-987abc)"), "youtu.be normalizes to watch URLs");
+
+        String plain = new String(fs.openInput("Vids/Plain.md").readAllBytes(), StandardCharsets.UTF_8);
+        assertFalse(plain.contains("![](https://www.youtube.com"), "non-YouTube urls do not embed");
+
+        String both = new String(fs.openInput("Vids/Both.md").readAllBytes(), StandardCharsets.UTF_8);
+        int enclosureAt = both.indexOf("![](https://cdn/x.mp3)");
+        int youtubeAt = both.indexOf("![](https://www.youtube.com/watch?v=abc12345678)");
+        assertTrue(enclosureAt != -1 && youtubeAt != -1, "both embeds present");
+        assertTrue(enclosureAt < youtubeAt, "media embed comes first");
+    }
+
     private static SynthFile resolve(FeedFileSystem fs, String path) throws IOException {
         // mtime comes from the listed entry; content from openInput
         var entry = fs.listFiles(List.of()).stream()

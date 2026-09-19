@@ -5,6 +5,7 @@ import io.pskenny.pkspkms.io.fs.SynthesizedFileSystem;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -58,8 +59,19 @@ final class FeedNotes {
             note.append(yaml("media", item.enclosureUrl()));
             note.append("---\n");
 
+            List<String> embeds = new ArrayList<>();
             if (playableMedia(item.enclosureUrl(), item.enclosureType())) {
-                note.append("![](").append(item.enclosureUrl()).append(")\n\n");
+                embeds.add(item.enclosureUrl());
+            }
+            String youtube = youtubeEmbed(item.url());
+            if (youtube != null) {
+                embeds.add(youtube);
+            }
+            for (String embed : embeds) {
+                note.append("![](").append(embed).append(")\n");
+            }
+            if (!embeds.isEmpty()) {
+                note.append("\n");
             }
             if (item.summary() != null) {
                 note.append(item.summary()).append("\n");
@@ -93,6 +105,33 @@ final class FeedNotes {
         }
         return AUDIO_EXTENSIONS.stream().anyMatch(path::endsWith)
                 || VIDEO_EXTENSIONS.stream().anyMatch(path::endsWith);
+    }
+
+    // YouTube items embed a player: watch/shorts/youtu.be links normalize to
+    // the canonical watch URL; the url: property keeps the original link
+    private static final List<String> YOUTUBE_HOSTS = List.of(
+            "youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com",
+            "www.youtube-nocookie.com", "youtu.be");
+    private static final java.util.regex.Pattern YOUTUBE_ID =
+            java.util.regex.Pattern.compile("(?:watch\\?v=|youtu\\.be/|shorts/|live/|embed/)([A-Za-z0-9_-]{6,})");
+
+    private static String youtubeEmbed(String url) {
+        if (url == null || !YOUTUBE_HOSTS.contains(hostOf(url))) {
+            return null;
+        }
+        java.util.regex.Matcher matcher = YOUTUBE_ID.matcher(url);
+        return matcher.find() ? "https://www.youtube.com/watch?v=" + matcher.group(1) : null;
+    }
+
+    // Host without lowercasing the whole URL: YouTube IDs are case-sensitive
+    private static String hostOf(String url) {
+        int scheme = url.indexOf("://");
+        if (scheme == -1) {
+            return "";
+        }
+        String rest = url.substring(scheme + 3);
+        int slash = rest.indexOf('/');
+        return slash == -1 ? rest : rest.substring(0, slash);
     }
 
     // "2025-07-01 Episode title.md" — date prefix only when known
