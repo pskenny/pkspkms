@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -100,6 +101,56 @@ public class FeedFileSystemTest {
                 .getBytes(StandardCharsets.UTF_8), null, 7L);
 
         assertTrue(fs.exists("untitled.md"), "channel without title -> untitled note");
+    }
+
+    @Test
+    void podcastFrontmatterAndMediaEmbed() throws Exception {
+        String podcastRss = """
+                <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0" xmlns:slash="http://purl.org/rss/1.0/modules/slash/">
+                <channel>
+                  <title>Pod</title>
+                  <language>en-us</language>
+                  <lastBuildDate>Wed, 02 Jul 2025 08:00:00 GMT</lastBuildDate>
+                  <itunes:category text="Health"/>
+                  <itunes:image href="https://cdn/cover.jpg"/>
+                  <item>
+                    <title>Episode</title>
+                    <link>https://pod/ep</link>
+                    <pubDate>Tue, 01 Jul 2025 10:30:00 GMT</pubDate>
+                    <category>Health</category>
+                    <itunes:duration>1:02:05</itunes:duration>
+                    <itunes:episode>12</itunes:episode>
+                    <itunes:season>3</itunes:season>
+                    <comments>https://pod/ep#comments</comments>
+                    <slash:comments>42</slash:comments>
+                    <enclosure url="https://cdn/ep.mp3" type="audio/mpeg" length="100"/>
+                  </item>
+                  <item><title>Pdf</title><enclosure url="https://cdn/doc.pdf" type="application/pdf"/></item>
+                  <item><title>Typeless</title><enclosure url="https://cdn/x.mp3"/></item>
+                </channel></rss>
+                """;
+        FeedFileSystem fs = new FeedFileSystem(podcastRss.getBytes(StandardCharsets.UTF_8), "https://pod/rss", 9L);
+
+        String episode = new String(fs.openInput("Pod/2025-07-01 Episode.md").readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(episode.contains("tags:\n  - \"Health\"\n"), "item categories -> tags list");
+        assertTrue(episode.contains("\nseconds: 3725\n"), "numeric fields bind unquoted");
+        assertTrue(episode.contains("\nepisode: 12\n"));
+        assertTrue(episode.contains("\nseason: 3\n"));
+        assertTrue(episode.contains("\ncommentsCount: 42\n"));
+        String body = episode.substring(episode.lastIndexOf("---\n") + 4);
+        assertTrue(body.startsWith("![](https://cdn/ep.mp3)\n\n"), "audio embed leads the body");
+
+        String pdf = new String(fs.openInput("Pod/Pdf.md").readAllBytes(), StandardCharsets.UTF_8);
+        assertFalse(pdf.contains("![]("), "non-media enclosures do not embed");
+
+        String typeless = new String(fs.openInput("Pod/Typeless.md").readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(typeless.contains("![](https://cdn/x.mp3)"), "extension fallback when no type attr");
+
+        String channel = new String(fs.openInput("Pod.md").readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(channel.contains("language: \"en-us\""));
+        assertTrue(channel.contains("modified: \"2025-07-02T08:00:00Z\""));
+        assertTrue(channel.contains("tags:\n  - \"Health\"\n"));
+        assertTrue(channel.contains("image: \"https://cdn/cover.jpg\""));
     }
 
     private static SynthFile resolve(FeedFileSystem fs, String path) throws IOException {

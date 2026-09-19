@@ -50,7 +50,17 @@ pkspkms server --directory "/pkms/" --feed-vault "local:/path/to/feed.xml"
 Each feed materializes as a channel note (with `rss:` frontmatter, like your
 own channel bookmarks) plus one `YYYY-MM-DD Title.md` note per item. Podcast
 episodes carry the enclosure as a `media:` property; audio itself is not
-downloaded. Feeds are fetched once per server start and 301-style redirects
+downloaded.
+
+Item notes also carry, when the feed provides them: `tags` (categories),
+`seconds` (from `itunes:duration`, numeric — `seconds:[0 TO 1800]` finds short
+episodes), `episode`, `season`, `image`, `comments`, `commentsCount`, `guid`;
+channel notes gain `language`, `modified`, channel-level `tags`, `website`
+and `image`. Audio/video enclosures (by MIME type, falling back to file
+extension) embed at the top of the note body as `![](url)` so Obsidian
+renders a player; nothing is downloaded.
+
+Feeds are fetched once per server start and 301-style redirects
 (http → https) are followed; a feed that fails to fetch or parse logs an
 error and the vault is skipped — the server keeps running. These vaults are
 read-only: the `/cache` endpoint copies items into your vault as usual.

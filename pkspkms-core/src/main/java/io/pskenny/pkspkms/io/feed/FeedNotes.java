@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -25,18 +26,15 @@ final class FeedNotes {
 
         StringBuilder channel = new StringBuilder("---\n");
         channel.append(yaml("title", feed.title()));
-        if (feed.url() != null) {
-            channel.append(yaml("url", feed.url()));
-        }
-        if (feedUrl != null) {
-            channel.append(yaml("rss", feedUrl));
-        }
-        if (feed.author() != null) {
-            channel.append(yaml("author", feed.author()));
-        }
-        if (feed.description() != null) {
-            channel.append(yaml("description", feed.description()));
-        }
+        channel.append(yaml("url", feed.url()));
+        channel.append(yaml("rss", feedUrl));
+        channel.append(yaml("author", feed.author()));
+        channel.append(yaml("description", feed.description()));
+        channel.append(yaml("language", feed.language()));
+        channel.append(yaml("modified", feed.modified()));
+        channel.append(yamlList("tags", feed.tags()));
+        channel.append(yaml("website", feed.website()));
+        channel.append(yaml("image", feed.image()));
         channel.append("---\n");
         files.put(channelPath, new SynthesizedFileSystem.SynthFile(channel.toString(), mtime));
 
@@ -46,19 +44,23 @@ final class FeedNotes {
         for (FeedItem item : feed.items()) {
             StringBuilder note = new StringBuilder("---\n");
             note.append(yaml("title", item.title()));
-            if (item.url() != null) {
-                note.append(yaml("url", item.url()));
-            }
-            if (item.published() != null) {
-                note.append(yaml("published", item.published()));
-            }
-            if (item.author() != null) {
-                note.append(yaml("author", item.author()));
-            }
-            if (item.enclosureUrl() != null) {
-                note.append(yaml("media", item.enclosureUrl()));
-            }
+            note.append(yaml("url", item.url()));
+            note.append(yaml("published", item.published()));
+            note.append(yaml("author", item.author()));
+            note.append(yamlList("tags", item.tags()));
+            note.append(yamlNumber("seconds", item.seconds()));
+            note.append(yamlNumber("episode", item.episode()));
+            note.append(yamlNumber("season", item.season()));
+            note.append(yaml("image", item.image()));
+            note.append(yaml("comments", item.comments()));
+            note.append(yamlNumber("commentsCount", item.commentsCount()));
+            note.append(yaml("guid", item.guid()));
+            note.append(yaml("media", item.enclosureUrl()));
             note.append("---\n");
+
+            if (playableMedia(item.enclosureUrl(), item.enclosureType())) {
+                note.append("![](").append(item.enclosureUrl()).append(")\n\n");
+            }
             if (item.summary() != null) {
                 note.append(item.summary()).append("\n");
             }
@@ -67,6 +69,30 @@ final class FeedNotes {
                     new SynthesizedFileSystem.SynthFile(note.toString(), mtime));
         }
         return files;
+    }
+
+    // Audio/video enclosures embed in the note body: Obsidian renders external
+    // ![]() media; nothing is downloaded
+    private static final List<String> AUDIO_EXTENSIONS =
+            List.of(".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".wav", ".flac");
+    private static final List<String> VIDEO_EXTENSIONS =
+            List.of(".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi");
+
+    private static boolean playableMedia(String enclosureUrl, String enclosureType) {
+        if (enclosureUrl == null) {
+            return false;
+        }
+        if (enclosureType != null) {
+            String type = PathUtil.lower(enclosureType);
+            return type.startsWith("audio/") || type.startsWith("video/");
+        }
+        String path = PathUtil.lower(enclosureUrl);
+        int query = path.indexOf('?');
+        if (query != -1) {
+            path = path.substring(0, query);
+        }
+        return AUDIO_EXTENSIONS.stream().anyMatch(path::endsWith)
+                || VIDEO_EXTENSIONS.stream().anyMatch(path::endsWith);
     }
 
     // "2025-07-01 Episode title.md" — date prefix only when known
@@ -105,6 +131,24 @@ final class FeedNotes {
             return "";
         }
         return key + ": \"" + escape(value) + "\"\n";
+    }
+
+    static String yamlList(String key, List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return "";
+        }
+        StringBuilder list = new StringBuilder(key).append(":\n");
+        for (String value : values) {
+            list.append("  - \"").append(escape(value)).append("\"\n");
+        }
+        return list.toString();
+    }
+
+    static String yamlNumber(String key, Integer value) {
+        if (value == null) {
+            return "";
+        }
+        return key + ": " + value + "\n";
     }
 
     private static String escape(String value) {

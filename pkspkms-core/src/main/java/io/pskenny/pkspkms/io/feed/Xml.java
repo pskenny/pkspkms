@@ -73,7 +73,7 @@ final class Xml {
         return element.getTextContent() == null ? null : element.getTextContent().strip();
     }
 
-    private static List<Element> children(Element parent) {
+    static List<Element> children(Element parent) {
         List<Element> result = new ArrayList<>();
         NodeList nodes = parent.getChildNodes();
         for (int i = 0; i < nodes.getLength(); i++) {
@@ -83,5 +83,18 @@ final class Xml {
             }
         }
         return result;
+    }
+
+    // Namespace-URI lookup for collisions the local name alone can't resolve
+    // (plain <comments> is a URL, slash:comments is a count); null matches elements
+    // with no namespace
+    static Element firstByNamespace(Element parent, String localName, String namespaceUri) {
+        for (Element child : children(parent)) {
+            if (localName.equals(child.getLocalName())
+                    && java.util.Objects.equals(namespaceUri, child.getNamespaceURI())) {
+                return child;
+            }
+        }
+        return null;
     }
 }
