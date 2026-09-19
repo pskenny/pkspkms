@@ -31,12 +31,11 @@ Mount an OPML file as a read-only peer vault:
 pkspkms server --directory "/pkms/" --opml-vault "scy:/path/to/peer.opml"
 ```
 
-Outliner outlines (`text`, `_note`, `htmlUrl`, `type`) become one note per
-node, nested by ancestor path. Outlines carrying `xmlUrl` are feed
-subscriptions: the feed is fetched once at server start and mounted under the
 node's own path (channel note + date-prefixed item notes). Mixed trees are
 allowed. Outliner notes carry the OPML file's mtime, so unchanged files are
-not re-parsed on the next load.
+not re-parsed on the next load. Subscriptions fetch in parallel; a feed that
+fails to fetch or parse is skipped with a warning — the rest of the vault
+still mounts.
 
 ## Feed vaults
 
@@ -51,10 +50,10 @@ pkspkms server --directory "/pkms/" --feed-vault "local:/path/to/feed.xml"
 Each feed materializes as a channel note (with `rss:` frontmatter, like your
 own channel bookmarks) plus one `YYYY-MM-DD Title.md` note per item. Podcast
 episodes carry the enclosure as a `media:` property; audio itself is not
-downloaded. Feeds are fetched once per server start; a feed that fails to
-fetch or parse logs an error and the vault is skipped — the server keeps
-running. These vaults are read-only: the `/cache` endpoint copies items into
-your vault as usual.
+downloaded. Feeds are fetched once per server start and 301-style redirects
+(http → https) are followed; a feed that fails to fetch or parse logs an
+error and the vault is skipped — the server keeps running. These vaults are
+read-only: the `/cache` endpoint copies items into your vault as usual.
 
 > [!NOTE] These flags are separate from `--virtual-vault` because URLs contain
 > colons, which collide with the `alias:/path` split.

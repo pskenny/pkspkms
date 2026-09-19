@@ -20,7 +20,6 @@ public final class SyndicationVaults {
     // Remote URL: fetch once, then sniff like local content
     public static PkmsFileSystem forUrl(String url) throws IOException {
         byte[] bytes = FeedFetcher.httpGet(url);
-        FeedFetcher.enforceLimit(bytes, url);
         long now = System.currentTimeMillis();
         if (FeedParser.isOpml(bytes)) {
             return new OpmlFileSystem(bytes, now, FeedFetcher.loader());

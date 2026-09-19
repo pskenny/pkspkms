@@ -107,4 +107,32 @@ public class OpmlFileSystemTest {
         OpmlFileSystem fs = fsWithLocalFeed("<rss version=\"2.0\"><channel><title>F</title></channel></rss>");
         assertThrows(UnsupportedOperationException.class, () -> fs.writeString("x.md", "y"));
     }
+
+    @Test
+    void deadSubscriptionIsSkippedAndOthersMount() throws Exception {
+        Path goodFeed = vault.resolve("good.xml");
+        Files.writeString(goodFeed, """
+                <rss version="2.0"><channel>
+                  <title>Good</title>
+                  <item><title>Ep</title></item>
+                </channel></rss>
+                """);
+
+        String opml = """
+                <?xml version="1.0"?>
+                <opml version="2.0"><body>
+                  <outline text="Dead" xmlUrl="/nonexistent/dead-feed.xml"/>
+                  <outline text="Good" xmlUrl="%s"/>
+                  <outline text="Survivor" _note="outliner branch"/>
+                </body></opml>
+                """.formatted(goodFeed.toAbsolutePath());
+
+        // One dead feed must not abort the whole vault (large NewsBlur exports)
+        OpmlFileSystem fs = new OpmlFileSystem(opml.getBytes(StandardCharsets.UTF_8), 1000L, FeedFetcher.loader());
+
+        assertTrue(fs.exists("Good.md"), "good subscription mounts");
+        assertTrue(fs.exists("Good/Ep.md"), "good feed items mount");
+        assertFalse(fs.exists("Dead.md"), "dead subscription is skipped");
+        assertTrue(fs.exists("Survivor.md"), "outliner branch unaffected");
+    }
 }
