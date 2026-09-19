@@ -1,6 +1,6 @@
 # BUGS
 
-Open bug list, last verified 2026-09-06. **28 open, 24 closed (23 fixed, 1 declined)** (closed entries removed — see git
+Open bug list, last verified 2026-09-06. **27 open, 25 closed (24 fixed, 1 declined)** (closed entries removed — see git
 history of this file). IDs are stable: gaps in numbering are closed bugs.
 
 ## P0 — Security
@@ -27,7 +27,8 @@ history of this file). IDs are stable: gaps in numbering are closed bugs.
 | B17 | Duplicate names resolve nondeterministically (Set first-match; `LIMIT 1` no `ORDER BY`)                                                                                                                                                                                                                                                                                                                   | WikilinkService.java:44-58, WikilinkFinder.java:41-51                   |
 | B23 | `resolveEmbed` strips all backslashes from embedded content                                                                                                                                                                                                                                                                                                                                               | Export.java:259                                                         |
 | B24 | Literal `"ERROR"` / raw YAML leak into exported markdown                                                                                                                                                                                                                                                                                                                                                  | SqliteEmbedProcessor.java:111,120, SQLitePksFileRepository.java:421-435 |
-| B56 | `NOT field:x` dropped field-absent rows — SQL three-valued logic: absent property → `json_extract` NULL → pred NULL → `NOT NULL` excluded (`not type:Type_Page` returned 37 of 74) — **FIXED 2026-09-09** (`NOT COALESCE((pred), 0)` in `QueryCompiler.assemble`: null-safe negation, absent/null-valued properties match NOT; pinned by field-absent eq/wildcard/range/typed tests in QueryLanguageTest) | QueryCompiler.java:55                                                   |
+| B56 | `NOT field:x` dropped field-absent rows — SQL three-valued logic: absent property → `json_extract` NULL → pred NULL → `NOT NULL` excluded (`not type:Type_Page` returned 37 of 74) — **FIXED 2026-09-09** (`NOT COALESCE((pred), 0)` in `QueryCompiler.assemble`: null-safe negation, absent/null-valued properties match NOT; pinned by field-absent eq/wildcard/range/typed tests in QueryLanguageTest) | QueryCompiler.java:55 |
+| B57 | Symlinked virtual vault crashed startup: `walkFiles` followed symlinked directories and out-of-root file links, then `relativePath()` threw unchecked (`File ... is not under <root>`, solr-ref-guide links into `solr/core`) killing the whole server — **FIXED 2026-09-19** (walk never follows symlinked directories — also cycle-safe — and indexes file links only when their target stays in-root, deduped by canonical path; `--virtual-vault` mounts now catch per mount like syndication mounts so one broken vault skips instead of killing startup; pinned by JavaFileSystemTest symlink cases incl. a cycle) | JavaFileSystem.java, Application.java |
 
 ## P2 — Functional bugs
 

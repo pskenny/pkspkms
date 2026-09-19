@@ -1,11 +1,18 @@
 package io.pskenny.pkspkms.io.fs;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class JavaFileSystem implements PkmsFileSystem {
+    private static final Logger logger = LoggerFactory.getLogger(JavaFileSystem.class);
     private static final int BUFFER_SIZE = 8192;
     private final File root;
 
@@ -20,7 +27,7 @@ public class JavaFileSystem implements PkmsFileSystem {
     @Override
     public List<PkmsEntry> listFiles(List<String> excludedDirectories) throws IOException {
         List<PkmsEntry> result = new ArrayList<>();
-        walkFiles(root, excludedDirectories, result);
+        walkFiles(root, excludedDirectories, result, new HashSet<>());
         return result;
     }
 
@@ -110,15 +117,30 @@ public class JavaFileSystem implements PkmsFileSystem {
         }
     }
 
-    private void walkFiles(File dir, List<String> excluded, List<PkmsEntry> result) throws IOException {
+    private void walkFiles(File dir, List<String> excluded, List<PkmsEntry> result, Set<String> seen) throws IOException {
         File[] children = dir.listFiles();
         if (children == null) return;
         for (File child : children) {
             if (child.isDirectory()) {
+                // Symlinked directories are never followed: they risk cycles and
+                // typically escape the vault (B57)
+                if (Files.isSymbolicLink(child.toPath())) {
+                    continue;
+                }
                 if (excluded != null && excluded.contains(child.getName())) continue;
-                walkFiles(child, excluded, result);
+                walkFiles(child, excluded, result, seen);
             } else if (child.isFile()) {
-                result.add(new JavaFilePkmsEntry(root, child));
+                String canonical = child.getCanonicalFile().getCanonicalPath();
+                if (Files.isSymbolicLink(child.toPath())
+                        && !canonical.startsWith(root.getPath() + File.separator)) {
+                    logger.debug("Skipping symlink outside the vault: {}", child);
+                    continue;
+                }
+                // File links that stay in-root index under their target's path
+                // and must not duplicate it
+                if (seen.add(canonical)) {
+                    result.add(new JavaFilePkmsEntry(root, child));
+                }
             }
         }
     }

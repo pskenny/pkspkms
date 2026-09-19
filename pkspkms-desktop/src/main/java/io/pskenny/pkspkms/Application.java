@@ -90,23 +90,28 @@ public final class Application {
                 Server server = new Server(port, repository);
                 server.loadRepo();
 
-                // Load virtual friends
+                // Load virtual friends — per-mount try/catch: one broken vault
+                // logs and skips so it cannot take down the whole startup
                 List<String> virtualVaults = ns.get("virtual_vault");
                 if (virtualVaults != null) {
                     for (String spec : virtualVaults) {
-                        String[] parts = spec.split(":", 2);
-                        if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
-                            throw new IllegalArgumentException("Invalid --virtual-vault format: " + spec + ". Expected: alias:/path/to/vault");
+                        try {
+                            String[] parts = spec.split(":", 2);
+                            if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
+                                throw new IllegalArgumentException("Invalid --virtual-vault format: " + spec + ". Expected: alias:/path/to/vault");
+                            }
+                            String alias = parts[0];
+                            String path = parts[1];
+                            Path vDirPath = Paths.get(path);
+                            if (!Files.exists(vDirPath) || !Files.isDirectory(vDirPath)) {
+                                throw new IllegalArgumentException("Directory does not exist: " + path);
+                            }
+                            logger.info("Loading virtual vault: @{} -> {}", alias, path);
+                            PkmsFileSystem aliasFs = new JavaFileSystem(new File(path));
+                            server.loadVirtualVault(aliasFs, alias);
+                        } catch (IllegalArgumentException | io.pskenny.pkspkms.repo.RepositoryException e) {
+                            logger.error("Failed to mount vault '{}', skipping: {}", spec, e.getMessage());
                         }
-                        String alias = parts[0];
-                        String path = parts[1];
-                        Path vDirPath = Paths.get(path);
-                        if (!Files.exists(vDirPath) || !Files.isDirectory(vDirPath)) {
-                            throw new IllegalArgumentException("Directory does not exist: " + path);
-                        }
-                        logger.info("Loading virtual vault: @{} -> {}", alias, path);
-                        PkmsFileSystem aliasFs = new JavaFileSystem(new File(path));
-                        server.loadVirtualVault(aliasFs, alias);
                     }
                 }
 
