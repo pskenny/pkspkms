@@ -62,6 +62,7 @@ public class SyndicationVaultLoaderTest {
                 <rss version="2.0"><channel><title>CoRecursive</title>
                   <item><title>Syntax and Semantics</title><link>https://corecursive.com/ep</link>
                   <pubDate>Tue, 01 Jul 2025 10:30:00 GMT</pubDate></item>
+                  <item><title>Epic #1</title></item>
                 </channel></rss>
                 """);
     }
@@ -87,7 +88,7 @@ public class SyndicationVaultLoaderTest {
             repository.loadVirtualVault(opmlFs, "scy");
 
             var results = repository.searchRegular(Q("filePath:@scy/*"));
-            assertEquals(4, results.size(), "channel + item + 2 outliner notes");
+            assertEquals(5, results.size(), "channel + 2 items + 2 outliner notes");
 
             var lisp = results.stream().filter(f -> f.getFilePath().equals("@scy/Knowledge/Lisp.md")).findFirst().orElseThrow();
             assertEquals("Lisp", lisp.getMutableProperties().get("title"), "outliner title frontmatter");
@@ -97,6 +98,12 @@ public class SyndicationVaultLoaderTest {
             assertEquals("Syntax and Semantics", episode.getMutableProperties().get("title"));
             assertEquals("https://corecursive.com/ep", episode.getMutableProperties().get("url"));
             assertEquals("2025-07-01T10:30:00Z", episode.getMutableProperties().get("published"));
+
+            // # in a filename: only a quoted filePath phrase matches (the raw
+            // [[wikilink]] heading convention splits on #, so path queries it is)
+            var hashNote = repository.searchRegular(Q("filePath:\"@scy/Podcast/Epic #1.md\""));
+            assertEquals(1, hashNote.size(), "quoted filePath with # matches");
+            assertEquals("@scy/Podcast/Epic #1.md", hashNote.get(0).getFilePath());
         }
     }
 

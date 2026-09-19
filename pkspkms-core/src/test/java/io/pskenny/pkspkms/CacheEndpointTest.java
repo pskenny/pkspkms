@@ -179,6 +179,27 @@ public class CacheEndpointTest {
     }
 
     @Test
+    @DisplayName("GET /cache resolves a percent-encoded # in the location")
+    void testCacheHashInFilename() throws IOException, InterruptedException, SQLException {
+        // Clients must send # as %23 (raw # is a fragment and clients drop it);
+        // the server decodes it and matches the file by its literal name
+        startServer();
+        repository.loadVirtualVault(new JavaFileSystem(VIRTUAL_DIR.toFile()), "gwern");
+        Files.writeString(VIRTUAL_DIR.resolve("note #1.md"), "hash note");
+        HttpClient client = HttpClient.newHttpClient();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/cache/@gwern/note%20%231.md?directory=.pkspkms-cache"))
+                .GET()
+                .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), "Encoded # must resolve to the literal file");
+        assertTrue(Files.exists(CACHE_DIR.resolve("@gwern").resolve("note #1.md")),
+                "Cached copy keeps the literal #");
+    }
+
+    @Test
     @DisplayName("GET /cache strips the leading @ and copies a new virtual-vault file")
     void testCacheFirstClickCachesFromVirtualVault() throws IOException, InterruptedException, SQLException {
         // pkspkms://@gwern/note.md -> /cache/@gwern/note.md: the alias registers

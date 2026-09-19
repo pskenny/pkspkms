@@ -74,6 +74,11 @@ read-only: the `/cache` endpoint copies items into your vault as usual.
 > [!NOTE] These flags are separate from `--virtual-vault` because URLs contain
 > colons, which collide with the `alias:/path` split.
 
+> [!NOTE] Filenames containing `#` work: clients must send `#` as `%23`
+> (raw `#` is a URL fragment and clients drop it), and queries match with a
+> quoted phrase (`filePath:"@scy/Epic #1.md"`). `[[wikilinks]]` cannot resolve
+> them — `#` splits as the heading separator, so use path-based links.
+
 Once loaded, the vault's files are stored in the database with `@alias/`-prefixed
 paths (e.g. `@bob/git.md`), and wikilinks resolve across all loaded vaults by
 file name and path. See [Querying](Querying.md) for searching across vaults.

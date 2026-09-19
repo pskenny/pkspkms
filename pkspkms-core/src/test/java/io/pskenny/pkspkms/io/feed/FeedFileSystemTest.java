@@ -188,6 +188,21 @@ public class FeedFileSystemTest {
         assertTrue(enclosureAt < youtubeAt, "media embed comes first");
     }
 
+    @Test
+    void hashInFeedTitlesKeepsTheLiteral() throws Exception {
+        // # is a legal vault filename character: synthesized paths keep it,
+        // lookups match it, and clients transport it as %23
+        FeedFileSystem fs = new FeedFileSystem("""
+                <rss version="2.0"><channel><title>Hashes</title>
+                  <item><title>Epic #1</title></item>
+                </channel></rss>
+                """.getBytes(StandardCharsets.UTF_8), null, 5L);
+
+        assertTrue(fs.exists("Hashes/Epic #1.md"), "literal # kept in the note path");
+        String content = new String(fs.openInput("Hashes/Epic #1.md").readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(content.contains("title: \"Epic #1\""), "content readable under the # path");
+    }
+
     private static SynthFile resolve(FeedFileSystem fs, String path) throws IOException {
         // mtime comes from the listed entry; content from openInput
         var entry = fs.listFiles(List.of()).stream()
