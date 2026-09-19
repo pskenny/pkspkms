@@ -93,6 +93,15 @@ public class FeedFileSystemTest {
         }
     }
 
+    @Test
+    void untitledChannelStillMounts() throws Exception {
+        // bsky-style bridges can ship a channel without a title: must not NPE
+        FeedFileSystem fs = new FeedFileSystem("<rss version=\"2.0\"><channel><link>https://x/</link></channel></rss>"
+                .getBytes(StandardCharsets.UTF_8), null, 7L);
+
+        assertTrue(fs.exists("untitled.md"), "channel without title -> untitled note");
+    }
+
     private static SynthFile resolve(FeedFileSystem fs, String path) throws IOException {
         // mtime comes from the listed entry; content from openInput
         var entry = fs.listFiles(List.of()).stream()

@@ -98,8 +98,12 @@ final class FeedNotes {
         }
     }
 
-    // Double-quoted YAML scalar so colons, quotes and newlines survive frontmatter parsing
+    // Double-quoted YAML scalar so colons, quotes and newlines survive
+    // frontmatter parsing; null values are omitted (title-less channels happen)
     static String yaml(String key, String value) {
+        if (value == null) {
+            return "";
+        }
         return key + ": \"" + escape(value) + "\"\n";
     }
 
