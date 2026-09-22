@@ -53,7 +53,7 @@ public class YamlParser {
         }
 
         // Timestamps keep their original text: Date objects would be serialized to
-        // epoch millis by Jackson on the DB properties round trip (B43). Nothing
+        // epoch millis by Jackson on the DB properties round trip. Nothing
         // downstream needs date arithmetic; ISO strings still sort lexicographically.
         private static class ConstructDate extends AbstractConstruct {
             @Override

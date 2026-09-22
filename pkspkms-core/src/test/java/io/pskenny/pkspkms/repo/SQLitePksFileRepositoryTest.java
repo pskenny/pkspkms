@@ -74,12 +74,13 @@ public class SQLitePksFileRepositoryTest {
 
             try (Connection conn = DriverManager.getConnection(DB_URL);
                  PreparedStatement pstmt = conn.prepareStatement("SELECT file_name, file_name_ext FROM FILES WHERE file_path = ?")) {
-                pstmt.setString(1, TEST_DIR.resolve("test1.md").toString());
+                // The loader stores vault-relative paths (P3: the old absolute
+                // TEST_DIR.resolve probe never matched, so this asserted nothing)
+                pstmt.setString(1, "test1.md");
                 ResultSet rs = pstmt.executeQuery();
-                if (rs.next()) {
-                    assertEquals("test1", rs.getString("file_name"));
-                    assertEquals("test1.md", rs.getString("file_name_ext"));
-                }
+                assertTrue(rs.next(), "indexed file must be found by its vault-relative path");
+                assertEquals("test1", rs.getString("file_name"));
+                assertEquals("test1.md", rs.getString("file_name_ext"));
             }
         }
     }
@@ -391,6 +392,30 @@ public class SQLitePksFileRepositoryTest {
 
             assertTrue(repository.searchRegular(Q("filePath:File1.md")).get(0).getAsList("backlinks").isEmpty(),
                     "no backlinks -> key absent");
+        }
+    }
+
+    @Test
+    void sqliteFilesAreOwnerOnly() throws Exception {
+        // Vault index metadata is sensitive: other local users must not read it
+        // (the umask default left it group/world-readable) (B3 quick win)
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
+        createFile(TEST_DIR, "keep.md", Map.of(), "");
+
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository(DB_URL, null, new JavaFileSystem(TEST_DIR.toFile()))) {
+            repository.loadDirectoryIntoRepository();
+
+            java.util.Set<java.nio.file.attribute.PosixFilePermission> ownerOnly = java.util.Set.of(
+                    java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                    java.nio.file.attribute.PosixFilePermission.OWNER_WRITE);
+            assertEquals(ownerOnly, Files.getPosixFilePermissions(Path.of(TEST_DB_PATH)));
+            for (String suffix : List.of("-wal", "-shm")) {
+                Path side = Path.of(TEST_DB_PATH + suffix);
+                if (Files.exists(side)) {
+                    assertEquals(ownerOnly, Files.getPosixFilePermissions(side), suffix + " sidecar");
+                }
+            }
         }
     }
 

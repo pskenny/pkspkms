@@ -23,16 +23,28 @@ public final class PksFile {
     }
 
     public PksFile(PksFile source) {
-        this.properties = new LinkedHashMap<>(source.getMutableProperties());
+        this.properties = deepCopy(source.properties);
         this.hash = source.hash;
         this.lastModified = source.lastModified;
     }
 
     public PksFile(PksFile source, String newFilePath) {
-        this.properties = new LinkedHashMap<>(source.getMutableProperties());
+        this.properties = deepCopy(source.properties);
         this.properties.put("filePath", newFilePath);
         this.hash = source.hash;
         this.lastModified = source.lastModified;
+    }
+
+    // Copies are independent: without deep-copying lists, a copied file's
+    // addAll (addToProperty) silently mutated the source's lists too
+    private static Map<String, Object> deepCopy(Map<String, Object> source) {
+        Map<String, Object> copy = new LinkedHashMap<>(source.size());
+        for (Map.Entry<String, Object> entry : source.entrySet()) {
+            copy.put(entry.getKey(), entry.getValue() instanceof List<?> list
+                    ? new ArrayList<>(list)
+                    : entry.getValue());
+        }
+        return copy;
     }
 
     private String getFilePath(java.io.File file, String directory) {

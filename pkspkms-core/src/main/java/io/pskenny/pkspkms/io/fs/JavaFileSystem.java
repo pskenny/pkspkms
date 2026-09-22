@@ -123,7 +123,7 @@ public class JavaFileSystem implements PkmsFileSystem {
         for (File child : children) {
             if (child.isDirectory()) {
                 // Symlinked directories are never followed: they risk cycles and
-                // typically escape the vault (B57)
+                // typically escape the vault
                 if (Files.isSymbolicLink(child.toPath())) {
                     continue;
                 }

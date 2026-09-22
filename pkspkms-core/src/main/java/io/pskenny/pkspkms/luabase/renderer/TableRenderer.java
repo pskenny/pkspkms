@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class TableRenderer {
     private static final Logger logger = LoggerFactory.getLogger(TableRenderer.class);
@@ -30,6 +31,9 @@ public class TableRenderer {
                 .append("\n");
 
         List<String> finalOrderSpec1 = orderSpec;
+        // Render-time failures are counted, not spammed: one row's failing
+        // expression used to log a full stack trace per row (thousands of lines)
+        final AtomicInteger failures = new AtomicInteger();
         files.forEach(pksFile -> {
             StringBuilder row = new StringBuilder("|");
             java.util.Map<String, Object> fileProperties = pksFile.getMutableProperties();
@@ -40,11 +44,15 @@ public class TableRenderer {
                     row.append(" ").append(propValue).append(" |");
                 });
             } catch(Exception e) {
-                logger.error("Error while evaluating expression", e);
+                failures.incrementAndGet();
+                row.append(" error |");
             }
             sb.append(row);
             sb.append("\n");
         });
+        if (failures.get() > 0) {
+            logger.warn("Table render: {} row(s) had failing expressions", failures.get());
+        }
         return sb.toString();
     }
 }

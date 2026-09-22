@@ -54,13 +54,17 @@ public final class Application {
                 String directory = ns.getString("directory");
                 int port = ns.getInt("port");
                 String dbPath = ns.getString("db");
+                String bind = ns.getString("bind");
                 boolean tray = ns.getBoolean("tray");
+
+                String apiToken = resolveToken(ns.getString("token"), ns.getString("token_file"));
+                logger.info("API token written to {}", ns.getString("token_file"));
 
                 TrayManager trayManager = null;
                 LogCapture logCapture = null;
                 CountDownLatch latch = null;
 
-                // setup tray — non-blocking: falls back headless if init fails or stalls (B55)
+                // setup tray — non-blocking: falls back headless if init fails or stalls
                 if (tray) {
                     logCapture = new LogCapture();
                     try {
@@ -87,7 +91,7 @@ public final class Application {
                         "jdbc:sqlite:" + dbPath,
                         SQLiteLuaConnector.luaFunctionRegistrar(),
                         vaultFs);
-                Server server = new Server(port, repository);
+                Server server = new Server(bind, port, apiToken, repository);
                 server.loadRepo();
 
                 // Load virtual friends — per-mount try/catch: one broken vault
@@ -209,6 +213,29 @@ public final class Application {
         }
     }
 
+    // Token bootstrap: explicit --token wins (scripted use, no file touched);
+    // otherwise a fresh random token is generated at EVERY start and written
+    // 0600 to the token file — a leaked token dies at the next restart.
+    static String resolveToken(String tokenFlag, String tokenFileFlag) throws IOException {
+        if (tokenFlag != null && !tokenFlag.isEmpty()) {
+            return tokenFlag;
+        }
+
+        java.security.SecureRandom random = new java.security.SecureRandom();
+        byte[] bytes = new byte[24];
+        random.nextBytes(bytes);
+        String token = java.util.HexFormat.of().formatHex(bytes);
+
+        java.nio.file.Path file = java.nio.file.Path.of(tokenFileFlag);
+        java.nio.file.Files.createDirectories(file.getParent());
+        java.nio.file.Files.writeString(file, token + "\n");
+        if (java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+            java.nio.file.Files.setPosixFilePermissions(file,
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+        }
+        return token;
+    }
+
     // Mounts the --opml-vault/--feed-vault entries. Sources group by alias
     // ('alias:<url-or-file>' — repeatable), and each source fetches through
     // FeedCollectionFileSystem: per-source failures warn and skip, so one
@@ -289,6 +316,17 @@ public final class Application {
                 .action(Arguments.storeTrue())
                 .setDefault(Boolean.FALSE)
                 .help("Show a system tray icon (desktop environments only)");
+        serverParser.addArgument("--bind")
+                .type(String.class)
+                .setDefault("127.0.0.1")
+                .help("Address to bind (default 127.0.0.1 — loopback only)");
+        serverParser.addArgument("--token")
+                .type(String.class)
+                .help("API token (argv — visible in ps; prefer --token-file)");
+        serverParser.addArgument("--token-file")
+                .type(String.class)
+                .setDefault(java.nio.file.Path.of(System.getProperty("user.home"), ".config", "pkspkms", "token").toString())
+                .help("Where the fresh per-start API token is written (0600)");
         serverParser.addArgument("--virtual-vault")
                 .type(String.class)
                 .action(Arguments.append())

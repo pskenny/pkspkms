@@ -4,51 +4,48 @@ import io.pskenny.pkspkms.repo.sqlite.SQLitePragmas;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.sql.*;
-import java.util.*;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 
-public class WikilinkService {
+/**
+ * Wikilink resolution for embed processing: one connection per service,
+ * resolution delegated to {@link WikilinkFinder} (LRU cache + one SQL probe).
+ * Replaces the old scan-into-HashMap resolver whose duplicate-name lookup was
+ * unordered (7) — one resolver implementation, one semantics.
+ */
+public class WikilinkService implements AutoCloseable {
+
     private static final Logger logger = LoggerFactory.getLogger(WikilinkService.class);
-    private final String dbUrl;
-    private volatile Map<String, Set<String>> cache = new HashMap<>();
+
+    private final Connection conn;
+    private final WikilinkFinder finder = new WikilinkFinder();
 
     public WikilinkService(String dbUrl) {
-        this.dbUrl = dbUrl;
-        refreshCache();
-    }
-
-    private synchronized void refreshCache() {
-        Map<String, Set<String>> newMap = new HashMap<>();
-        String sql = "SELECT file_path FROM FILES";
-
-        try (Connection conn = DriverManager.getConnection(dbUrl)) {
-            // PRAGMAs before the query so they actually apply to it (B25)
-            SQLitePragmas.apply(conn);
-            try (Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery(sql)) {
-
-                while (rs.next()) {
-                    String path = rs.getString("file_path");
-                    String name = new java.io.File(path).getName();
-
-                    // Cache maps filename -> paths
-                    newMap.computeIfAbsent(name, k -> new HashSet<>()).add(path);
-                }
-            }
-            this.cache = newMap;
+        try {
+            this.conn = DriverManager.getConnection(dbUrl);
+            SQLitePragmas.apply(this.conn);
         } catch (SQLException e) {
-            logger.error("Error refreshing wikilink cache", e);
+            throw new IllegalStateException("Failed to open wikilink resolver connection", e);
         }
     }
 
+    // Resolves by full path, name.ext, or bare name — the finder's probe order
+    // covers the old cache's text-then-text+".md" fallback
     public String resolve(String text) {
-        text = text.startsWith("/") ? text.substring(1) : text;
-        Set<String> matches = cache.get(text);
-
-        if (matches == null && !text.endsWith(".md")) {
-            matches = cache.get(text + ".md");
+        if (text == null || text.isEmpty()) {
+            return null;
         }
+        String cleaned = text.startsWith("/") ? text.substring(1) : text;
+        return finder.resolveWikilink(conn, cleaned);
+    }
 
-        return (matches != null && !matches.isEmpty()) ? matches.iterator().next() : null;
+    @Override
+    public void close() {
+        try {
+            conn.close();
+        } catch (SQLException e) {
+            logger.warn("Failed to close wikilink resolver connection", e);
+        }
     }
 }

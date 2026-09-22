@@ -22,7 +22,7 @@ public final class QueryCompiler {
     }
 
     // Lucene flat-clause semantics: MUSTs AND; SHOULDs OR (only when no MUSTs);
-    // MUST_NOTs excluded, null-safe so field-absent rows match (B56); pure
+    // MUST_NOTs excluded, null-safe so field-absent rows match; pure
     // MUST_NOTs anchored with 1=1.
     private void assemble(List<Query.Clause> clauses, PropertyTypes types, StringBuilder sql, List<Object> params) {
         List<Query.Clause> musts = new ArrayList<>();
@@ -54,7 +54,7 @@ public final class QueryCompiler {
         }
         for (Query.Clause c : nots) {
             // Null-safe negation: absent/null property -> pred NULL -> COALESCE 0 -> NOT
-            // matches. Lucene semantics: NOT matches docs not containing the term (B56).
+            // matches. Lucene semantics: NOT matches docs not containing the term.
             parts.add("NOT COALESCE((" + node(c.node(), types, params) + "), 0)");
         }
         sql.append(String.join(" AND ", parts));
@@ -247,7 +247,7 @@ public final class QueryCompiler {
         return sb.isEmpty() ? "1=1" : sb.toString();
     }
 
-    // JSON path with a quoted key, so kebab-case and friends work (B20)
+    // JSON path with a quoted key, so kebab-case and friends work
     private static String jsonPath(String field) {
         return "$.\"" + field.replace("\"", "\\\"") + "\"";
     }

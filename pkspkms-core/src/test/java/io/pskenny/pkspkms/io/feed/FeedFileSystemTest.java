@@ -83,6 +83,9 @@ public class FeedFileSystemTest {
             exchange.close();
         });
         server.start();
+        // The SSRF guard blocks loopback by default; tests allow it
+        java.util.function.Predicate<String> savedGuard = FeedFetcher.hostGuard;
+        FeedFetcher.hostGuard = host -> true;
         try {
             FeedFileSystem fs = new FeedFileSystem(
                     FeedFetcher.httpGet("http://localhost:" + server.getAddress().getPort() + "/feed.xml"),
@@ -90,6 +93,7 @@ public class FeedFileSystemTest {
                     System.currentTimeMillis());
             assertTrue(fs.exists("CoRecursive Podcast.md"), "fetched feed materializes the channel note");
         } finally {
+            FeedFetcher.hostGuard = savedGuard;
             server.stop(0);
         }
     }

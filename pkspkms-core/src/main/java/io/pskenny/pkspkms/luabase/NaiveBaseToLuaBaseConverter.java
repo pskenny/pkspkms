@@ -48,7 +48,6 @@ public class NaiveBaseToLuaBaseConverter {
                     "local t = {}; " +
                     "local tags_array = getPropertyValue(file, \"tags\", nil); " +
                     "if tags_array then " +
-                    "tags_array = tags_array:toArray(); " +
                     "for i=1, #tags_array do " +
                     "local v = tags_array[i]; " +
                     "table.insert(t, \"#\" .. tostring(v)) " +

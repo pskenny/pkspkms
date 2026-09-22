@@ -11,7 +11,7 @@ import java.util.function.Supplier;
  * Creates the system tray off the startup critical path. dorkbox initialization
  * can block indefinitely (desktop-detection subprocess spawn), so construction
  * runs in a worker thread with a timeout and fails headless instead of hanging
- * the application (BUGS.md B55).
+ * the application.
  */
 public final class TrayFactory {
 

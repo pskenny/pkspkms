@@ -1,13 +1,21 @@
 # Architecture
 
-Reflects the codebase as of 2026-09-09. Known deviations from these ideals are tracked in [BUGS.md](BUGS.md) (P3).
+Bugs are tracked in [BUGS.md](BUGS.md).
 
 ## Modules
 
 - **`pkspkms-core`** — library: domain objects, parsers, query engine, repository, HTTP server, Bases rendering
-- **`pkspkms-desktop`** — executable: CLI (`Application`), system tray (`TrayManager`, `TrayFactory`), and `SQLiteLuaConnector`
+- **`pkspkms-desktop`** — executable: CLI (`Application`), system tray (`TrayManager`, `TrayFactory`), and 
+  `SQLiteLuaConnector`
 
-`SQLiteLuaConnector` lives in desktop, not core: it registers the `lua_eval` SQLite function via `org.sqlite.Function`, and core declares `sqlite-jdbc` test-scoped so an Android app can consume core with its own driver. Core accepts a `Consumer<Connection>` registrar instead — without one, Lua-backed Bases queries are skipped. `TrayFactory` builds the tray on a worker thread with a 5-second timeout: tray initialization can block indefinitely (dorkbox desktop-detection subprocess), so a stalled tray degrades the app headless instead of hanging startup (B55). `io/fs` is the filesystem plumbing (disk, plus `SynthesizedFileSystem` for read-only in-memory vaults); `io/feed` mounts OPML outlines and RSS/Atom/podcast feeds as virtual vaults — fetched once at server start, per-vault failures log and skip.
+`SQLiteLuaConnector` lives in desktop, not core: it registers the `lua_eval` SQLite function via `org.sqlite.Function`, 
+and core declares `sqlite-jdbc` test-scoped so an Android app can consume core with its own driver (reference module: 
+`docs/android/`). Core accepts a `Consumer<Connection>` registrar instead — without one, Lua-backed Bases queries are 
+skipped. `TrayFactory` builds the tray on a worker thread with a 5-second timeout: tray initialization can block 
+indefinitely (dorkbox desktop-detection subprocess), so a stalled tray degrades the app headless instead of hanging 
+startup. `io/fs` is the filesystem plumbing (disk, plus `SynthesizedFileSystem` for read-only in-memory vaults); 
+`io/feed` mounts OPML outlines and RSS/Atom/podcast feeds as virtual vaults — fetched once at server start, 
+per-vault failures log and skip.
 
 ## Load pipeline
 
@@ -25,7 +33,8 @@ Application (CLI)
             │      other -> Blake3 stream-hash only (binaries never materialize)
             └─ 6. serial on one connection:
                    insertFiles -> resolveWikilinks -> updatePropertiesAndLinks
-       └─ SqliteEmbedProcessor.processAll()   (render ```base / ```luabase embeds — once, after every vault mounts)
+       └─ SqliteEmbedProcessor.processAll()   (render ```base / ```luabase embeds — once, after every vault mounts;
+                                                 corpus single-pass: loadCorpus → processOverCorpus, one JSON parse per file per render pass)
 ```
 
 Everything touching SQLite is serial on a single JDBC connection (SQLite is single-writer, even in WAL). Only parse/hash runs in parallel — it has no shared mutable state. The DB is a disposable cache today: tables are dropped and recreated on every repository construction (BUGS.md B8), so every load is a full rescan. Embed rendering is global across vaults: vault mounts only seed EMBEDS rows, and `processEmbeds()` runs once after the full mount sequence so a luabase always filters over the complete corpus.
@@ -46,13 +55,13 @@ query string
 ```
 
 - **Fully parameterized**: keys are quoted JSON paths (`$."my-key"`) and values are
-  bound via `PreparedStatement` — no string interpolation (B20 closed)
+  bound via `PreparedStatement` — no string interpolation
 - **PropertyTypes**: comparisons are compiled per the declared Obsidian type —
   `number` casts both sides to REAL (string-stored values match numeric ranges),
   `date`/`text` compare lexicographically; undeclared fields keep the legacy
-  shape-sniffed compare (B53)
+  shape-sniffed compare
 - **Malformed input** raises `QueryParseException` (offset + message) — the HTTP
-  layer maps it to HTTP 400 (B6); the old silent `1=1` fallback is gone
+  layer maps it to HTTP 400; the old silent `1=1` fallback is gone
 
 Full language spec: [docs/core/Querying.md](docs/core/Querying.md).
 
@@ -90,11 +99,16 @@ the `YamlParser` (frontmatter) and converter paths.
 
 Virtual vault rows are prefixed `@alias/`.
 
-## HTTP server (NanoHTTPD, core)
-
-`/ping`, `/files/list`, `/files/search`, `/files/list/graph`, `/cache/{address}/{location}`,
-`/webui/*`. GET + OPTIONS only, CORS `*`. Responses stream JSON through a piped thread;
-malformed queries return HTTP 400 with a JSON error body.
+`/ping`, `/config`, `/files/list`, `/files/list/graph`, `/files/manifest`, `/cache/{address}/{location}`,
+`/webui/*`, `/openapi.json`. Binds 127.0.0.1 by default (`--bind` opt-out). Bearer-token auth on every
+route except `/ping` and `/webui/*` (constant-time compare; a fresh SecureRandom token is generated
+at every start and written 0600 to `~/.config/pkspkms/token`). Host-header allow-list (DNS-rebinding
+defense); no CORS; `/cache` is POST-only. Webui responses carry CSP
+(`default-src 'self'; script-src 'self'; frame-ancestors 'none'`), `X-Frame-Options: DENY`,
+`nosniff`, `Referrer-Policy: no-referrer`; the UI script is served as `/webui/app.js`
+(`script-src 'self'` forbids inline). Access logs record paths only. Responses stream JSON through
+a piped thread; malformed queries return HTTP 400 with a JSON error body. Token bootstrap:
+`Application.resolveToken`.
 
 ## Known layering violations (tracked in BUGS.md P3)
 

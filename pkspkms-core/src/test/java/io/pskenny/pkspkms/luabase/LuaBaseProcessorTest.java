@@ -1,10 +1,10 @@
 package io.pskenny.pkspkms.luabase;
 
 import io.pskenny.pkspkms.io.PksFile;
-import io.pskenny.pkspkms.io.fs.PkmsFileSystem;
-import io.pskenny.pkspkms.repo.PksFileRepository;
+import io.pskenny.pkspkms.repo.sqlite.SQLitePksFileRepository;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -16,15 +16,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/*
-More filters that don't work:
-- bookmark.contains("Things") - contains function not implemented
-- bookmark.containsAny("Things", "Music") - containsAny with multiple values not implemented
-- type == ["some_type"] - property equals arrays not implemented
-- file.inFolder("images/blah") - inFolder not implemented
-
-- what to do with cards?
- */
 public class LuaBaseProcessorTest {
     @Test
     public  void testProcess_withTableView_returnTable() {
@@ -159,7 +150,7 @@ public class LuaBaseProcessorTest {
                 name: "My table"
                 order:
                   - 'getPropertyValue(file, "filePath"), "Path"'
-                  - 'table.concat( (function() local t = {}; local tags_array = (getPropertyValue(file, \"tags\") or {}):toArray(); for i=1, #tags_array do local v = tags_array[i]; table.insert(t, "[" .. v .. "](/tags/" .. v .. ")") end; return t end)(), \", \"), "tags"'
+                  - 'table.concat( (function() local t = {}; local tags_array = (getPropertyValue(file, \"tags\") or {}); for i=1, #tags_array do local v = tags_array[i]; table.insert(t, "[" .. v .. "](/tags/" .. v .. ")") end; return t end)(), \", \"), "tags"'
             """;
         Map<String, PksFile> files = new HashMap<>();
         files.put("my_book_note.md", new PksFile("my_book_note.md", new HashMap<>() {{
@@ -195,13 +186,13 @@ public class LuaBaseProcessorTest {
                     direction: ASC
             """;
         Map<String, PksFile> files = new HashMap<>();
-        files.put("a.md", new PksFile("a.md", new HashMap<String, Object>() {{
+        files.put("a.md", new PksFile("a.md", new HashMap<>() {{
             put("price", 10.5095);
         }}));
-        files.put("b.md", new PksFile("b.md", new HashMap<String, Object>() {{
+        files.put("b.md", new PksFile("b.md", new HashMap<>() {{
             put("price", 3.00);
         }}));
-        files.put("d.md", new PksFile("d.md", new HashMap<String, Object>() {{
+        files.put("d.md", new PksFile("d.md", new HashMap<>() {{
             put("price", 6.00);
         }}));
 
@@ -231,13 +222,13 @@ public class LuaBaseProcessorTest {
                     direction: DESC
             """;
         Map<String, PksFile> files = new HashMap<>();
-        files.put("a.md", new PksFile("a.md", new HashMap<String, Object>() {{
+        files.put("a.md", new PksFile("a.md", new HashMap<>() {{
             put("price", 10.5095);
         }}));
-        files.put("b.md", new PksFile("b.md", new HashMap<String, Object>() {{
+        files.put("b.md", new PksFile("b.md", new HashMap<>() {{
             put("price", 3.00);
         }}));
-        files.put("c.md", new PksFile("c.md", new HashMap<String, Object>() {{
+        files.put("c.md", new PksFile("c.md", new HashMap<>() {{
             put("price", 6.00);
         }}));
 
@@ -305,11 +296,11 @@ creationDate: 2025-08-21
                     direction: ASC
             """;
         Map<String, PksFile> files = new HashMap<>();
-        files.put("a.md", new PksFile("a.md", new HashMap<String, Object>() {{
+        files.put("a.md", new PksFile("a.md", new HashMap<>() {{
             put("price", 10.5095);
         }}));
         files.put("b.md", new PksFile("b.md", new HashMap()));
-        files.put("c.md", new PksFile("c.md", new HashMap<String, Object>() {{
+        files.put("c.md", new PksFile("c.md", new HashMap<>() {{
             put("price", 6.00);
         }}));
 
@@ -350,11 +341,11 @@ creationDate: 2025-08-21
                     direction: DESC
             """;
         Map<String, PksFile> files = new HashMap<>();
-        files.put("a.md", new PksFile("a.md", new HashMap<String, Object>() {{
+        files.put("a.md", new PksFile("a.md", new HashMap<>() {{
             put("price", 10.5095);
         }}));
         files.put("b.md", new PksFile("b.md", new HashMap()));
-        files.put("c.md", new PksFile("c.md", new HashMap<String, Object>() {{
+        files.put("c.md", new PksFile("c.md", new HashMap<>() {{
             put("price", 6.00);
         }}));
 
@@ -461,28 +452,11 @@ creationDate: 2025-08-21
     }
 
     @Test
-    void process_repositoryPath_appliesSort() {
-        PksFileRepository fakeRepo = new PksFileRepository() {
-            @Override
-            public List<PksFile> searchWithLuaFilter(String lua) {
-                return List.of(
-                        new PksFile("b.md", new HashMap<>(Map.of("price", 10))),
-                        new PksFile("a.md", new HashMap<>(Map.of("price", 3)))
-                );
-            }
-
-            @Override public void loadDirectoryIntoRepository() { throw new UnsupportedOperationException(); }
-            @Override public void loadVirtualVault(PkmsFileSystem aliasFs, String alias) { throw new UnsupportedOperationException(); }
-            @Override public List<PksFile> searchRegular(io.pskenny.pkspkms.repo.query.CompiledQuery query) { throw new UnsupportedOperationException(); }
-            @Override public String resolveWikilink(String wikilink) { throw new UnsupportedOperationException(); }
-            @Override public int addVaultAlias(String alias, String directory, boolean isVirtual) { throw new UnsupportedOperationException(); }
-            @Override public boolean vaultAliasExists(String alias) { throw new UnsupportedOperationException(); }
-            @Override public Map<String, Object> cacheFile(String address, String location, String cacheDirectory) { throw new UnsupportedOperationException(); }
-            @Override public void createPropertyIndex(String propertyKey, String type) { throw new UnsupportedOperationException(); }
-            @Override public String getMarkdownFromLuaBase(String luaBaseYaml) { throw new UnsupportedOperationException(); }
-            @Override public String getMarkdownFromBase(String baseYaml) { throw new UnsupportedOperationException(); }
-            @Override public void close() { throw new UnsupportedOperationException(); }
-        };
+    void processOverCorpus_appliesSort() {
+        List<PksFile> corpus = List.of(
+                new PksFile("b.md", new HashMap<>(Map.of("price", 10))),
+                new PksFile("a.md", new HashMap<>(Map.of("price", 3)))
+        );
 
         final String yaml = """
             views:
@@ -494,7 +468,7 @@ creationDate: 2025-08-21
                     direction: ASC
             """;
 
-        String result = new LuaBaseProcessor().process(new YamlParser().parse(yaml), fakeRepo);
+        String result = new LuaBaseProcessor().processOverCorpus(new YamlParser().parse(yaml), corpus);
         assertTrue(result.indexOf("| 3 |") < result.indexOf("| 10 |"));
     }
 
@@ -543,5 +517,157 @@ creationDate: 2025-08-21
 
         assertTrue(result.indexOf("| 2025-08-21 |") < result.indexOf("| 2025-08-22 |"),
                 "Mixed date types must render and sort deterministically");
+    }
+
+    // --- B2 regression: sandboxed coercion must keep list-valued properties working ---
+
+    @Test
+    public void tagsSnippetRendersHashtagsOverListProperty() {
+        // The generated tags column (LuaBaseProcessor tags template) previously
+        // relied on luajava-provided `:toArray()` — denied by the sandbox (B2)
+        Map<String, PksFile> files = new HashMap<>();
+        files.put("file.md", new PksFile("file.md", new HashMap<>() {{
+            put("tags", List.of("Meta", "Hostile"));
+        }}));
+
+        LuaBaseInterpreter interpreter = new LuaBaseInterpreter();
+        org.luaj.vm2.LuaValue result = interpreter.evaluateLuaExpression(
+                "table.concat( (function() local t = {}; local tags_array = getPropertyValue(file, \"tags\", nil); "
+                        + "if tags_array then for i=1, #tags_array do local v = tags_array[i]; "
+                        + "table.insert(t, \"#\" .. tostring(v)) end end; return t end)(), \" \")",
+                files.get("file.md").getMutableProperties());
+        assertEquals("#Meta #Hostile", result.tojstring(), "tags list must render without luajava");
+    }
+
+    @Test
+    public void listMembershipWorksInSandbox() {
+        Map<String, Object> file = new HashMap<>() {{
+            put("tags", List.of("x", "y"));
+        }};
+        LuaBaseInterpreter interpreter = new LuaBaseInterpreter();
+        org.junit.jupiter.api.Assertions.assertTrue(
+                interpreter.evaluateLuaExpression("hasPropertyValue(file, \"tags\", \"y\")", file).toboolean(),
+                "list membership must work without luajava method calls");
+        org.junit.jupiter.api.Assertions.assertFalse(
+                interpreter.evaluateLuaExpression("hasPropertyValue(file, \"tags\", \"z\")", file).toboolean());
+    }
+
+    // --- characterization: corpus rendering must keep the SQL-path outputs ---
+    // (written against the current lua_eval path; the in-memory single-pass
+    // refactor must reproduce these byte-for-byte)
+
+    private final io.pskenny.pkspkms.luabase.LuaBaseProcessor charProcessor = new io.pskenny.pkspkms.luabase.LuaBaseProcessor();
+
+    @Test
+    public void embedRender_characterization_andFilterWithSort() throws Exception {
+        Path dir = java.nio.file.Files.createTempDirectory("embed-char");
+        io.pskenny.pkspkms.test.FileUtil.createFile(dir, "alpha.md", Map.of("tags", List.of("x"), "price", 20), "");
+        io.pskenny.pkspkms.test.FileUtil.createFile(dir, "beta.md", Map.of("tags", List.of("x"), "price", 45), "");
+        io.pskenny.pkspkms.test.FileUtil.createFile(dir, "gamma.md", Map.of(), "");
+
+        try (SQLitePksFileRepository repository = characterRepo(dir)) {
+            repository.loadDirectoryIntoRepository();
+
+            final String yaml = """
+                views:
+                  - type: table
+                    filters:
+                      and:
+                        - 'hasPropertyValue(file, "tags", "x")'
+                    order:
+                      - 'getPropertyValue(file, "filePath"), "Path"'
+                    sort:
+                      - property: filePath
+                        direction: asc
+                """;
+            String rendered = charProcessor.processOverCorpus(new YamlParser().parse(yaml), repository.loadCorpus());
+            String expected = """
+                | Path |
+                |---|
+                | alpha.md |
+                | beta.md |
+                """;
+            assertEquals(expected, rendered, "and-filter + sort characterization");
+        }
+    }
+
+    @Test
+    public void embedRender_characterization_orFilterMatchesFieldAbsentFile() throws Exception {
+        Path dir = java.nio.file.Files.createTempDirectory("embed-char");
+        io.pskenny.pkspkms.test.FileUtil.createFile(dir, "alpha.md", Map.of("tags", List.of("x")), "");
+        io.pskenny.pkspkms.test.FileUtil.createFile(dir, "gamma.md", Map.of(), "");
+
+        try (SQLitePksFileRepository repository = characterRepo(dir)) {
+            repository.loadDirectoryIntoRepository();
+
+            final String yaml = """
+                views:
+                  - type: table
+                    filters:
+                      or:
+                        - 'getPropertyValue(file, "filePath", "") == "gamma.md"'
+                    order:
+                      - 'getPropertyValue(file, "filePath"), "Path"'
+                """;
+            String rendered = charProcessor.processOverCorpus(new YamlParser().parse(yaml), repository.loadCorpus());
+            String expected = """
+                | Path |
+                |---|
+                | gamma.md |
+                """;
+            assertEquals(expected, rendered, "field-absent files match via their other properties");
+        }
+    }
+
+    @Test
+    public void embedRender_characterization_invalidFilterRendersHeadersOnly() throws Exception {
+        Path dir = java.nio.file.Files.createTempDirectory("embed-char");
+        io.pskenny.pkspkms.test.FileUtil.createFile(dir, "alpha.md", Map.of(), "");
+
+        try (SQLitePksFileRepository repository = characterRepo(dir)) {
+            repository.loadDirectoryIntoRepository();
+
+            final String yaml = """
+                views:
+                  - type: table
+                    filters:
+                      and:
+                        - 'this is ) not ( valid'
+                    order:
+                      - 'getPropertyValue(file, "filePath"), "Path"'
+                """;
+            String rendered = charProcessor.processOverCorpus(new YamlParser().parse(yaml), repository.loadCorpus());
+            String expected = """
+                | Path |
+                |---|
+                """;
+            assertEquals(expected, rendered, "invalid filter renders headers only (old skip behavior)");
+        }
+    }
+
+    private SQLitePksFileRepository characterRepo(Path dir) throws Exception {
+        // Inline lua_eval matching SQLiteLuaConnector's callback contract — the
+        // connector itself is desktop-scoped and unavailable to core tests
+        java.util.function.Consumer<java.sql.Connection> registrar = conn -> {
+            try {
+                org.sqlite.Function.create(conn, "lua_eval", new org.sqlite.Function() {
+                    @Override
+                    protected void xFunc() throws java.sql.SQLException {
+                        try {
+                            String expression = value_text(0);
+                            Map<String, Object> props = new com.fasterxml.jackson.databind.ObjectMapper()
+                                    .readValue(value_text(1), new com.fasterxml.jackson.core.type.TypeReference<>() {});
+                            result(new LuaBaseInterpreter().evaluateExpression(expression, props) ? 1 : 0);
+                        } catch (Throwable t) {
+                            result(0);
+                        }
+                    }
+                });
+            } catch (java.sql.SQLException e) {
+                throw new RuntimeException(e);
+            }
+        };
+        return new io.pskenny.pkspkms.repo.sqlite.SQLitePksFileRepository(
+                "jdbc:sqlite:test_embed_char.db", registrar, new io.pskenny.pkspkms.io.fs.JavaFileSystem(dir.toFile()));
     }
 }

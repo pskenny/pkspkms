@@ -47,7 +47,7 @@ views:
       and:
         - 'hasPropertyValue(file, "tags", "Orange")'
     order:
-      - 'table.concat( (function() local t = {}; local tags_array = getPropertyValue(file, "tags", nil); if tags_array then tags_array = tags_array:toArray(); for i=1, #tags_array do local v = tags_array[i]; table.insert(t, "#" .. tostring(v)) end end; return t end)(), " "), "tags"'
+      - 'table.concat( (function() local t = {}; local tags_array = getPropertyValue(file, "tags", nil); if tags_array then for i=1, #tags_array do local v = tags_array[i]; table.insert(t, "#" .. tostring(v)) end end; return t end)(), " "), "tags"'
             """.trim();
 
         String actual = naiveBaseToLuaBaseConverter.convert(input).trim();

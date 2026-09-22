@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -41,11 +42,24 @@ public class Server extends NanoHTTPD {
             "/META-INF/resources/webjars/swagger-ui/" + SWAGGER_UI_WEBJAR_VERSION + "/";
 
     private final PksFileRepository repository;
+    private final String bearerToken;
 
     public Server(int port, PksFileRepository repository) {
-        super(port);
-        this.repository = repository;
+        this("127.0.0.1", port, null, repository);
     }
+
+    // Loopback-only by default: a local personal server has no business being
+    // reachable from the network. token != null enables bearer auth on
+    // every route except /ping and /webui.
+    public Server(String bind, int port, String token, PksFileRepository repository) {
+        super(bind, port);
+        this.repository = repository;
+        this.bearerToken = token;
+    }
+
+    private static final String BEARER_PREFIX = "Bearer ";
+    private static final java.util.Set<String> ALLOWED_HOSTS =
+            java.util.Set.of("localhost", "127.0.0.1", "[::1]", "[::1]:", "localhost.localdomain");
 
     @Override
     public Response serve(IHTTPSession session) {
@@ -53,19 +67,30 @@ public class Server extends NanoHTTPD {
         String ip = session.getRemoteIpAddress();
         String ua = session.getHeaders().get("user-agent");
         String uri = session.getUri();
-        Response res;
         var params = session.getParameters();
+        Response res;
 
-        if (session.getMethod() == Method.OPTIONS) {
+        // Host allow-list: browser DNS-rebinding requests arrive with an
+        // attacker-chosen Host header — refuse anything but loopback hosts
+        if (!isAllowedHost(session)) {
+            res = newFixedLengthResponse(Response.Status.FORBIDDEN, "text/plain", "Unrecognized Host header");
+        } else if (requiresAuth(uri) && !authorized(session)) {
+            res = newFixedLengthResponse(Response.Status.UNAUTHORIZED, "application/json",
+                    JsonUtil.mapToJson(java.util.Map.of("status", "error", "message", "Missing or invalid Authorization header")));
+        } else if (session.getMethod() == Method.OPTIONS) {
             res = newFixedLengthResponse(Response.Status.OK, "text/plain", "");
+        } else if (uri.startsWith("/cache/")) {
+            if (session.getMethod() != Method.POST) {
+                // State changes ride POST only — a browser <img> can't mutate the vault
+                res = newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, "text/plain", "Use POST");
+            } else {
+                res = handleCacheEndpoint(uri, params);
+            }
         } else if (session.getMethod() != Method.GET) {
             res = newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, "text/plain", "");
         } else if ("/ping".equals(uri)) {
             res = newFixedLengthResponse(Response.Status.OK, "text/plain", "");
         } else if ("/files/list".equals(uri)) {
-            var query = getParam(params, "query");
-            res = streamJsonResponse(query);
-        } else if ("/files/search".equals(uri)) {
             var query = getParam(params, "query");
             res = streamJsonResponse(query);
         } else if ("/files/list/graph".equals(uri)) {
@@ -84,6 +109,13 @@ public class Server extends NanoHTTPD {
             res = (htmlStream != null)
                 ? newChunkedResponse(Response.Status.OK, "text/html", htmlStream)
                 : newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "UI resource missing");
+            addBrowserHardeningHeaders(res);
+        } else if ("/webui/app.js".equals(uri)) {
+            InputStream jsStream = getClass().getResourceAsStream("/webui/app.js");
+            res = (jsStream != null)
+                ? newChunkedResponse(Response.Status.OK, "text/javascript", jsStream)
+                : newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not Found");
+            addBrowserHardeningHeaders(res);
         } else if ("/webui/pk.png".equals(uri)) {
             InputStream iconStream = getClass().getResourceAsStream("/webui/pk.png");
             res = (iconStream != null)
@@ -100,25 +132,60 @@ public class Server extends NanoHTTPD {
             res = newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not Found");
         }
 
-        res.addHeader("Access-Control-Allow-Origin", "*");
-        res.addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        // No CORS: the webui is same-origin, and the API is loopback-only.
+        // Cross-origin access to a personal vault was an open door, not a feature.
 
         long ms = (System.nanoTime() - startNs) / 1_000_000;
         String ts = ZonedDateTime.now(ZoneId.systemDefault()).format(APACHE_FMT);
         int status = res.getStatus().getRequestStatus();
-        String queryString = session.getQueryParameterString();
-        String fullUri = uri + (queryString != null && !queryString.isEmpty() ? "?" + queryString : "");
+        // Log the path only — query strings carry note metadata (log hygiene)
         logger.info("{} - - [{}] \"{} {}\" {} - ({}ms) \"-\" \"{}\"",
             ip != null ? ip : "-",
             ts,
             session.getMethod(),
-            fullUri,
+            uri,
             status,
             ms,
             ua != null ? ua : "-"
         );
 
         return res;
+    }
+
+    // Browser-hardening backstop: even if escaping ever regresses, the browser blocks inline
+    // scripts and framing
+    private static void addBrowserHardeningHeaders(Response res) {
+        res.addHeader("Content-Security-Policy",
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src *; frame-ancestors 'none'");
+        res.addHeader("X-Frame-Options", "DENY");
+        res.addHeader("X-Content-Type-Options", "nosniff");
+        res.addHeader("Referrer-Policy", "no-referrer");
+    }
+
+    private static boolean isAllowedHost(IHTTPSession session) {
+        String host = session.getHeaders().get("host");
+        if (host == null) {
+            return true; // HTTP/1.0-style client — loopback tests use it too
+        }
+        String hostname = host.toLowerCase(Locale.ROOT);
+        int colon = hostname.startsWith("[") ? hostname.indexOf(']') + 1 : hostname.indexOf(':');
+        String bare = colon > 0 ? hostname.substring(0, colon) : hostname;
+        return bare.equals("localhost") || bare.equals("127.0.0.1") || bare.equals("[::1]") || bare.equals("::1");
+    }
+
+    private boolean requiresAuth(String uri) {
+        return bearerToken != null && !"/ping".equals(uri) && !uri.startsWith("/webui");
+    }
+
+    private boolean authorized(IHTTPSession session) {
+        String auth = session.getHeaders().get("authorization");
+        if (auth == null || !auth.startsWith(BEARER_PREFIX)) {
+            return false;
+        }
+        // Constant-time comparison: token lengths never leak through timing
+        return java.security.MessageDigest.isEqual(
+                (BEARER_PREFIX + bearerToken).getBytes(StandardCharsets.UTF_8),
+                auth.getBytes(StandardCharsets.UTF_8));
     }
 
     private Response handleCacheEndpoint(String uri, Map<String, List<String>> params) {

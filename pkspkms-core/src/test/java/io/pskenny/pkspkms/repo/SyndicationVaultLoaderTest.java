@@ -43,6 +43,10 @@ public class SyndicationVaultLoaderTest {
         return new QueryCompiler().compile(new QueryParser().parse(q));
     }
 
+    private static byte[] throwUnresolvable(String source) throws IOException {
+        throw new IOException("Unresolvable feed source: " + source);
+    }
+
     @BeforeEach
     void setUp() throws IOException {
         Files.deleteIfExists(Path.of("test_syndication.db"));
@@ -54,9 +58,9 @@ public class SyndicationVaultLoaderTest {
                   <outline text="Knowledge">
                     <outline text="Lisp" _note="garbage collection" htmlUrl="https://x/lisp" type="link"/>
                   </outline>
-                  <outline text="Podcast" xmlUrl="%s"/>
+                  <outline text="Podcast" xmlUrl="https://fixture.test/feed.xml"/>
                 </body></opml>
-                """.formatted(FEED_FILE.toAbsolutePath()));
+                """);
         Files.writeString(FEED_FILE, """
                 <?xml version="1.0"?>
                 <rss version="2.0"><channel><title>CoRecursive</title>
@@ -84,7 +88,10 @@ public class SyndicationVaultLoaderTest {
         try (SQLitePksFileRepository repository = new SQLitePksFileRepository(DB_URL, null, new JavaFileSystem(MAIN_DIR.toFile()))) {
             repository.loadDirectoryIntoRepository();
 
-            PkmsFileSystem opmlFs = new OpmlFileSystem(OPML_FILE, FeedFetcher.loader());
+            PkmsFileSystem opmlFs = new OpmlFileSystem(OPML_FILE,
+                    source -> source.equals("https://fixture.test/feed.xml")
+                            ? Files.readAllBytes(FEED_FILE)
+                            : throwUnresolvable(source));
             repository.loadVirtualVault(opmlFs, "scy");
 
             var results = repository.searchRegular(Q("filePath:@scy/*"));

@@ -64,7 +64,8 @@ if ! mvn clean package -q; then
     exit 1
 fi
 
-JAR="$SCRIPT_DIR/pkspkms-desktop/target/pkspkms-desktop-0.1.0.jar"
+VERSION="$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout -pl pkspkms-desktop 2>/dev/null || echo 0.1.0)"
+JAR="$SCRIPT_DIR/pkspkms-desktop/target/pkspkms-desktop-${VERSION}.jar"
 if [ ! -f "$JAR" ]; then
     error "Expected JAR not found: $JAR"
     exit 1

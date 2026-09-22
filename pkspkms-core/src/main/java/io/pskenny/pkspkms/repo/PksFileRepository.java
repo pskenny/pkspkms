@@ -29,7 +29,11 @@ public interface PksFileRepository extends AutoCloseable {
         searchRegular(query).forEach(consumer);
     }
 
-    List<PksFile> searchWithLuaFilter(String luaScript);
+    /**
+     * All files as parsed PksFile maps, in storage order. One JSON parse per
+     * file — the corpus for single-pass embed rendering.
+     */
+    List<PksFile> loadCorpus();
 
     String resolveWikilink(String wikilink);
 

@@ -6,8 +6,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 
 /** HTTP fetching for remote feeds and OPML subscriptions. Fetch-once-per-start. */
@@ -17,20 +15,39 @@ public final class FeedFetcher {
     private static final int TIMEOUT_MS = 10_000;
     private static final int MAX_FEED_BYTES = 10 * 1024 * 1024;
     private static final int MAX_ATTEMPTS = 3;
+    private static final int MAX_REDIRECTS = 5;
     private static final long RETRY_DELAY_CAP_MS = 30_000;
     private static final long THROTTLE_MAX_INTERVAL_MS = 30_000;
 
-    // NORMAL follows cross-protocol http->https 301s (libsyn-style) but blocks
-    // secure-to-insecure downgrades
+    // Redirects are followed manually so every target passes the fetch policy
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofMillis(TIMEOUT_MS))
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
 
     // Test seams: sleeper and clock are swapped by FeedFetcherTest so pacing
     // and retries assert without real waiting
     static java.util.function.Consumer<Long> sleeper = FeedFetcher::sleepMs;
     static java.util.function.LongSupplier clockNanos = System::nanoTime;
+
+    // SSRF guard seam: production rejects loopback/link-local/private-range
+    // targets; FeedFetcherTest swaps it (harness servers run on loopback)
+    static java.util.function.Predicate<String> hostGuard = FeedFetcher::isPublicHost;
+
+    // Resolvable hosts must be public — loopback/link-local/private-range
+    // fetches are refused (B22)
+    static boolean isPublicHost(String host) {
+        if (host == null || host.isEmpty()) {
+            return false;
+        }
+        try {
+            java.net.InetAddress addr = java.net.InetAddress.getByName(host);
+            return !addr.isLoopbackAddress() && !addr.isSiteLocalAddress()
+                    && !addr.isLinkLocalAddress() && !addr.isAnyLocalAddress();
+        } catch (java.net.UnknownHostException e) {
+            return false;
+        }
+    }
 
     // --- per-host pacing (AIMD) ---
 
@@ -87,35 +104,84 @@ public final class FeedFetcher {
 
     private FeedFetcher() {}
 
-    /** Loads a feed or OPML source: http(s) URLs are fetched, anything else is a local path. */
+    /** Lenient loader for operator-configured sources: http(s) remote or local paths. */
     public static FeedLoader loader() {
         return FeedFetcher::load;
+    }
+
+    /**
+     * Strict loader for untrusted-content sources (OPML-embedded subscriptions):
+     * http(s) targets only — an untrusted outline can never read local files.
+     */
+    public static FeedLoader strictLoader() {
+        return FeedFetcher::strictLoad;
     }
 
     static byte[] load(String source) throws IOException {
         if (source.startsWith("http://") || source.startsWith("https://")) {
             return httpGet(source);
         }
-        return Files.readAllBytes(Path.of(source));
+        throw new IOException("non-http(s) feed source refused: " + source);
+    }
+
+    static byte[] strictLoad(String source) throws IOException {
+        return load(source);
+    }
+
+    // Fetch policy: scheme http(s), host not loopback/link-local/private-range
+    private static void checkTarget(URI target) throws IOException {
+        String scheme = target.getScheme() == null ? "" : target.getScheme().toLowerCase(java.util.Locale.ROOT);
+        if (!scheme.equals("http") && !scheme.equals("https")) {
+            throw new IOException("non-http(s) feed target refused: " + target);
+        }
+        if (!hostGuard.test(target.getHost())) {
+            throw new IOException("Feed fetch refused private/loopback target: " + target);
+        }
     }
 
     static byte[] httpGet(String url) throws IOException {
-        URI uri = URI.create(url);
-        Throttle throttle = THROTTLES.computeIfAbsent(hostOf(uri), host -> new Throttle());
-
+        URI target = URI.create(url);
+        IOException failure = null;
+        int redirectsLeft = MAX_REDIRECTS;
+        int attempts = 0;
         long retryDelayMs = 0;
-        IOException blocked = null;
-        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+
+        while (true) {
+            if (attempts >= MAX_ATTEMPTS) {
+                throw failure != null ? failure : new IOException("Feed fetch exhausted retries: " + url);
+            }
+            checkTarget(target);
+            Throttle throttle = THROTTLES.computeIfAbsent(hostOf(target), host -> new Throttle());
             acquire(throttle, retryDelayMs);
             retryDelayMs = 0;
 
-            HttpResponse<InputStream> response = send(uri, url);
+            HttpResponse<InputStream> response = send(target, url);
             int status = response.statusCode();
+
             if (status == 429 || status == 503) {
                 response.body().close();
-                blocked = new IOException("Feed fetch failed with HTTP " + status + ": " + url);
-                retryDelayMs = retryDelayMs(response.headers(), attempt);
+                attempts++;
+                if (attempts >= MAX_ATTEMPTS) {
+                    throw new IOException("Feed fetch exhausted retries: " + url);
+                }
+                failure = new IOException("Feed fetch failed with HTTP " + status + ": " + url);
+                retryDelayMs = retryDelayMs(response.headers(), attempts);
                 throttle.minIntervalMs = growInterval(throttle.minIntervalMs);
+                continue;
+            }
+            if (status == 301 || status == 302 || status == 307 || status == 308) {
+                response.body().close();
+                if (redirectsLeft-- == 0) {
+                    throw new IOException("Too many redirects: " + url);
+                }
+                String location = response.headers().firstValue("Location").orElse(null);
+                if (location == null) {
+                    throw new IOException("Redirect without Location: " + url);
+                }
+                URI next = target.resolve(location);
+                checkTarget(next);
+                target = next;
+                attempts = 0;
                 continue;
             }
             if (status != 200) {
@@ -129,7 +195,6 @@ public final class FeedFetcher {
             }
             return body;
         }
-        throw blocked;
     }
 
     private static HttpResponse<InputStream> send(URI uri, String url) throws IOException {

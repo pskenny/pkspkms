@@ -42,7 +42,7 @@ public final class TrayManager {
             if (is != null) {
                 systemTray.setImage(is);
             } else {
-                logger.warn("Tray icon /brain-icon.png not found on classpath");
+                logger.warn("Tray icon /pk.png not found on classpath");
             }
         } catch (IOException e) {
             logger.warn("Could not load tray icon", e);

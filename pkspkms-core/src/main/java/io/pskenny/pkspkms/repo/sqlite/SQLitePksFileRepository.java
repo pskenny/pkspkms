@@ -27,6 +27,7 @@ import java.util.*;
 public class SQLitePksFileRepository implements SqliteRepository {
     private static final Logger logger = LoggerFactory.getLogger(SQLitePksFileRepository.class);
     private final Connection conn;
+    private final String dbPath;
     private final ObjectMapper jsonMapper = new ObjectMapper();
 
     private final LuaBaseProcessor processor = new LuaBaseProcessor();
@@ -47,6 +48,7 @@ public class SQLitePksFileRepository implements SqliteRepository {
                                    java.util.function.Consumer<java.sql.Connection> luaFunctionRegistrar,
                                    PkmsFileSystem vaultFs) {
         this.mainFs = vaultFs;
+        this.dbPath = dbUrl.startsWith("jdbc:sqlite:") ? dbUrl.substring("jdbc:sqlite:".length()) : null;
         try {
             this.conn = DriverManager.getConnection(dbUrl);
             SQLitePragmas.apply(this.conn);
@@ -66,6 +68,32 @@ public class SQLitePksFileRepository implements SqliteRepository {
                     naiveBaseToLuaBaseConverter, markdownProcessor, this);
         } catch (SQLException e) {
             throw new RepositoryException("Failed to connect to database: " + dbUrl, e);
+        }
+        restrictDbFilePermissions();
+    }
+
+    // Vault index metadata is sensitive: the process umask leaves the database
+    // and its WAL sidecars group/world-readable, so every local user could read
+    // the whole index. Restricted to the owner (POSIX filesystems only).
+    private void restrictDbFilePermissions() {
+        if (dbPath == null || dbPath.isEmpty() || ":memory:".equals(dbPath)
+                || !java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+            return;
+        }
+
+        java.nio.file.Path path = java.nio.file.Path.of(dbPath);
+        for (java.nio.file.Path candidate : java.util.List.of(
+                path,
+                path.resolveSibling(path.getFileName() + "-wal"),
+                path.resolveSibling(path.getFileName() + "-shm"))) {
+            try {
+                if (java.nio.file.Files.exists(candidate)) {
+                    java.nio.file.Files.setPosixFilePermissions(candidate,
+                            java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+                }
+            } catch (IOException e) {
+                logger.warn("Could not restrict DB file permissions: {}", candidate, e);
+            }
         }
     }
 
@@ -127,6 +155,10 @@ public class SQLitePksFileRepository implements SqliteRepository {
             sqliteEmbedProcessor.processAll();
         } catch (SQLException | IOException e) {
             throw new RepositoryException("Failed to process embeds", e);
+        } catch (Throwable t) {
+            // Last-resort guard: embed rendering must never prevent
+            // server.start() — a failed embed is data loss, not downtime 
+            logger.error("Embed processing failed unexpectedly, continuing startup", t);
         }
     }
 
@@ -319,8 +351,8 @@ public class SQLitePksFileRepository implements SqliteRepository {
         }
     }
 
-    // Reverse lookup over LINKS; DISTINCT collapses the outgoing/wikilink double rows (B29).
-    // Query-time derivation: always fresh, no materialization (B7).
+    // Reverse lookup over LINKS; DISTINCT collapses the outgoing/wikilink double rows (11).
+    // Query-time derivation: always fresh, no materialization.
     private List<String> backlinksOf(int fileId) throws SQLException {
         List<String> backlinks = new ArrayList<>();
         String sql = "SELECT DISTINCT f.file_path FROM LINKS l JOIN FILES f ON f.id = l.source_file_id "
@@ -377,37 +409,19 @@ public class SQLitePksFileRepository implements SqliteRepository {
         }
     }
 
-    public List<PksFile> searchWithLuaFilter(String luaScript) {
-        List<PksFile> results = new ArrayList<>();
-
-        // Pre-validation: compile the Lua script once to catch syntax errors early
-        // and avoid expensive database queries that would crash on every row.
-        try {
-            processor.validateLuaFilter(luaScript);
-        } catch (RuntimeException e) {
-            logger.error("Invalid Lua filter syntax, skipping query: {}", luaScript);
-            return results;
-        }
-
-        String sql = "SELECT file_path, properties FROM FILES WHERE lua_eval(?, properties) = 1";
-
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, luaScript);
-
-            try (ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    String path = rs.getString("file_path");
-                    Map<String, Object> propMap = parseProperties(path, rs.getString("properties"));
-                    PksFile pksFile = new PksFile(path, propMap);
-                    results.add(pksFile);
-                }
+    @Override
+    public List<PksFile> loadCorpus() {
+        List<PksFile> corpus = new ArrayList<>();
+        String sql = "SELECT file_path, properties FROM FILES";
+        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                String path = rs.getString("file_path");
+                corpus.add(new PksFile(path, parseProperties(path, rs.getString("properties"))));
             }
         } catch (SQLException e) {
-            logger.error("Couldn't execute Lua filter query, " + luaScript);
-            throw new RepositoryException("Couldn't execute Lua filter query", e);
+            throw new RepositoryException("Failed to load corpus", e);
         }
-
-        return results;
+        return corpus;
     }
 
     @Override

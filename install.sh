@@ -2,7 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-JAR_SOURCE="$SCRIPT_DIR/pkspkms-desktop/target/pkspkms-desktop-0.1.0.jar"
+VERSION="$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout -pl pkspkms-desktop 2>/dev/null || echo 0.1.0)"
+JAR_SOURCE="$SCRIPT_DIR/pkspkms-desktop/target/pkspkms-desktop-${VERSION}.jar"
 
 # Defaults
 PREFIX="${HOME}/.local"
@@ -143,13 +144,9 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     info ""
 fi
 
-# Desktop database update hint
-if command -v update-desktop-database &>/dev/null; then
-    info "You may want to refresh the application menu:"
-    info "  update-desktop-database $APP_DIR"
-    info ""
-fi
-
 info "Run PKSPKMS:"
 info "  pkspkms server --directory <vault> --port 3000"
 info "  pkspkms server --directory <vault> --port 3000 --tray"
+info ""
+info "First server start writes an API token to ~/.config/pkspkms/token (0600)."
+info "Send it as: Authorization: Bearer $(cat ~/.config/pkspkms/token)"

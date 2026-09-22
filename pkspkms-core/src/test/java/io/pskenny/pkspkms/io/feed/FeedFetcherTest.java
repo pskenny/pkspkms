@@ -31,6 +31,9 @@ public class FeedFetcherTest {
     @BeforeEach
     void installSeams() {
         FeedFetcher.resetThrottles();
+        // Harness servers run on loopback: allow it; SSRF tests tighten the
+        // guard per test
+        FeedFetcher.hostGuard = host -> true;
         // Deterministic fake time: the sleeper advances the clock instead of
         // blocking, so throttle spacing and retry delays assert exactly
         FeedFetcher.clockNanos = () -> fakeNanos.get();
@@ -43,17 +46,47 @@ public class FeedFetcherTest {
     @AfterEach
     void restoreSeams() {
         FeedFetcher.resetThrottles();
+        FeedFetcher.hostGuard = FeedFetcher::isPublicHost;
         FeedFetcher.sleeper = FeedFetcher::sleepMs;
         FeedFetcher.clockNanos = System::nanoTime;
     }
 
     @Test
-    void redirectIsFollowed() throws Exception {
+    void nonHttpSourceIsRefused() {
+        // SSRF/LFI guard: feed sources must be http(s) — never local paths (B22)
+        IOException e = assertThrows(IOException.class, () -> FeedFetcher.load("/home/pk/.config/pkspkms/token"));
+        assertTrue(e.getMessage().contains("non-http"), "message names the policy: " + e.getMessage());
+    }
+
+    @Test
+    void sameHostRedirectIsFollowed() throws Exception {
         try (HttpServerHarness harness = new HttpServerHarness()) {
             harness.serve("/a", 301, new byte[0], "http://localhost:" + harness.port() + "/b");
             harness.serveStatic("/b", 200, BODY);
 
             assertArrayEquals(BODY, FeedFetcher.httpGet("http://localhost:" + harness.port() + "/a"));
+        }
+    }
+
+    @Test
+    void loopbackRedirectTargetIsRefused() throws Exception {
+        try (HttpServerHarness harness = new HttpServerHarness()) {
+            harness.serve("/a", 301, new byte[0], "http://127.0.0.1:1/x");
+
+            assertThrows(IOException.class,
+                    () -> FeedFetcher.httpGet("http://localhost:" + harness.port() + "/a"));
+        }
+    }
+
+    @Test
+    void privateRangeRedirectTargetIsRefused() throws Exception {
+        try (HttpServerHarness harness = new HttpServerHarness()) {
+            FeedFetcher.hostGuard = host -> host.equals("localhost");
+            harness.serve("/a", 301, new byte[0], "http://10.0.0.1/x");
+
+            IOException e = assertThrows(IOException.class,
+                    () -> FeedFetcher.httpGet("http://localhost:" + harness.port() + "/a"));
+            assertTrue(e.getMessage().contains("private/loopback"), "message names the policy: " + e.getMessage());
         }
     }
 

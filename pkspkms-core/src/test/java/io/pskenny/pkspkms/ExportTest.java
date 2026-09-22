@@ -326,7 +326,7 @@ Other""");
 
             @Override public void loadDirectoryIntoRepository() { throw new UnsupportedOperationException(); }
             @Override public void loadVirtualVault(PkmsFileSystem aliasFs, String alias) { throw new UnsupportedOperationException(); }
-            @Override public List<PksFile> searchWithLuaFilter(String luaScript) { throw new UnsupportedOperationException(); }
+            @Override public List<PksFile> loadCorpus() { throw new UnsupportedOperationException(); }
             @Override public String resolveWikilink(String wikilink) { throw new UnsupportedOperationException(); }
             @Override public int addVaultAlias(String alias, String directory, boolean isVirtual) { throw new UnsupportedOperationException(); }
             @Override public boolean vaultAliasExists(String alias) { throw new UnsupportedOperationException(); }
@@ -509,7 +509,7 @@ Other""");
 
             @Override public void loadDirectoryIntoRepository() { throw new UnsupportedOperationException(); }
             @Override public void loadVirtualVault(PkmsFileSystem aliasFs, String alias) { throw new UnsupportedOperationException(); }
-            @Override public List<PksFile> searchWithLuaFilter(String luaScript) { throw new UnsupportedOperationException(); }
+            @Override public List<PksFile> loadCorpus() { throw new UnsupportedOperationException(); }
             @Override public String resolveWikilink(String wikilink) { throw new UnsupportedOperationException(); }
             @Override public int addVaultAlias(String alias, String directory, boolean isVirtual) { throw new UnsupportedOperationException(); }
             @Override public boolean vaultAliasExists(String alias) { throw new UnsupportedOperationException(); }
@@ -822,7 +822,7 @@ Other""");
 
             @Override public void loadDirectoryIntoRepository() { throw new UnsupportedOperationException(); }
             @Override public void loadVirtualVault(PkmsFileSystem aliasFs, String alias) { throw new UnsupportedOperationException(); }
-            @Override public List<PksFile> searchWithLuaFilter(String luaScript) { throw new UnsupportedOperationException(); }
+            @Override public List<PksFile> loadCorpus() { throw new UnsupportedOperationException(); }
             @Override public String resolveWikilink(String wikilink) { throw new UnsupportedOperationException(); }
             @Override public int addVaultAlias(String alias, String directory, boolean isVirtual) { throw new UnsupportedOperationException(); }
             @Override public boolean vaultAliasExists(String alias) { throw new UnsupportedOperationException(); }

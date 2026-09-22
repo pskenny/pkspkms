@@ -20,11 +20,21 @@ clauses, bare-word all-property search, typed comparisons via types.json.
 Full syntax: [docs/core/Querying.md](docs/core/Querying.md)
 
 ## HTTP server
+- Loopback-only bind by default (`--bind` opt-out); every route except `/ping`
+  and the `/webui` pages requires a bearer token (a fresh random token is
+  generated per start and written 0600 to `~/.config/pkspkms/token`;
+  `--token` overrides)
 - `GET /ping` — liveness
-- `GET /files/list?query=…` / `/files/search` — property queries, JSON streamed
+- `GET /files/list?query=…` — property queries, JSON streamed
 - `GET /files/list/graph?query=…` — reduced to filePath/links/backlinks/tags
-- `GET /cache/{address}/{location}` — pull a file into the cache from a virtual vault
-- Web UI: query editor with syntax highlighting, saved queries, dark mode
+- `GET /files/manifest` — per-virtual-vault `{filePath, blake3}` pairs
+- `POST /cache/{address}/{location}?directory=…` — pull a file into the cache
+  from a virtual vault (POST only — drive-by GETs can't mutate the vault)
+- `GET /openapi.json` + `/webui/swagger` — OpenAPI 3.0 spec and Swagger UI
+- Host-header allow-list (DNS-rebinding defense); no CORS
+- Web UI: query editor with syntax highlighting, saved queries, dark mode;
+  CSP + `X-Frame-Options: DENY` + `nosniff` on webui responses; access logs
+  record paths only
 
 ## Bases rendering
 - ` ```base ` / ` ```luabase ` blocks render as Markdown tables or lists
@@ -48,7 +58,7 @@ Full syntax: [docs/core/Querying.md](docs/core/Querying.md)
 - Tables rebuilt from the vault each run (see BUGS.md B8)
 
 ## CLI
-- `pkspkms server --directory <vault> [--port 3000] [--db file] [--tray] [--virtual-vault a:/path]…`
+- `pkspkms server --directory <vault> [--port 3000] [--db file] [--tray] [--bind 127.0.0.1] [--token s | --token-file f] [--virtual-vault a:/path]… [--opml-vault a:file.opml]… [--feed-vault a:<url-or-file>]…`
 - `pkspkms export --directory <vault> --query "…" --output <dir> --type markdown|copy [--dryrun]`
 - System tray (desktop environments): status, open-in-browser, quit; degrades gracefully headless
-- Logging: SLF4J/simple, per-package debug via `-Dorg.slf4j.simpleLogger.log.io.pskenny.pkspkms=debug`
+- Logging: SLF4J/simple, per-package debug via `-Dorg.slf4j.simpleLogger.log.io.pskenny.pkspkms=debug`; access logs record paths only

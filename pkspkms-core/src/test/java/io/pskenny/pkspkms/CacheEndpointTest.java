@@ -83,7 +83,7 @@ public class CacheEndpointTest {
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/cache/@gwern/programming/haskell.md?directory=.pkspkms-cache"))
-                .GET()
+                .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -102,7 +102,7 @@ public class CacheEndpointTest {
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/cache/@gwern/nonexistent.md?directory=.pkspkms-cache"))
-                .GET()
+                .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -119,7 +119,7 @@ public class CacheEndpointTest {
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/cache/@gwern/programming/haskell.md"))
-                .GET()
+                .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -136,7 +136,7 @@ public class CacheEndpointTest {
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/cache/@gwern?directory=.pkspkms-cache"))
-                .GET()
+                .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -147,8 +147,24 @@ public class CacheEndpointTest {
     }
 
     @Test
-    @DisplayName("GET /cache returns CORS headers")
-    void testCacheEndpointCORSHeaders() throws IOException, InterruptedException, SQLException {
+    @DisplayName("GET /cache carries no CORS headers")
+    void testCacheEndpointNoCors() throws IOException, InterruptedException, SQLException {
+        startServer();
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/cache/@gwern/programming/haskell.md?directory=.pkspkms-cache"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertFalse(response.headers().firstValue("Access-Control-Allow-Origin").isPresent(),
+                "CORS must be gone (B3) — same-origin webui only");
+    }
+
+    @Test
+    @DisplayName("GET /cache is rejected — state changes ride POST only (B3)")
+    void testCacheEndpointGetRejected() throws IOException, InterruptedException, SQLException {
         startServer();
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder()
@@ -158,7 +174,7 @@ public class CacheEndpointTest {
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-        assertEquals("*", response.headers().firstValue("Access-Control-Allow-Origin").orElse(""), "Should have CORS header");
+        assertEquals(405, response.statusCode(), "drive-by GET must not mutate the vault");
     }
 
     @Test
@@ -168,7 +184,7 @@ public class CacheEndpointTest {
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/cache/@gwern/programming/haskell.md?directory=nonexistent-dir"))
-                .GET()
+                .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -190,7 +206,7 @@ public class CacheEndpointTest {
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/cache/@gwern/note%20%231.md?directory=.pkspkms-cache"))
-                .GET()
+                .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -210,7 +226,7 @@ public class CacheEndpointTest {
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/cache/@gwern/note.md?directory=.pkspkms-cache"))
-                .GET()
+                .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -220,7 +236,7 @@ public class CacheEndpointTest {
 
         HttpRequest bareRequest = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/cache/gwern/note.md?directory=.pkspkms-cache"))
-                .GET()
+                .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         HttpResponse<String> bareResponse = client.send(bareRequest, HttpResponse.BodyHandlers.ofString());
         assertEquals(200, bareResponse.statusCode(), "Bare alias URLs keep working");
@@ -235,7 +251,7 @@ public class CacheEndpointTest {
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/cache/@gwern/..%2F..%2Fsecret.md?directory=.pkspkms-cache"))
-                .GET()
+                .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -253,7 +269,7 @@ public class CacheEndpointTest {
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/cache/gwern/note.md?directory=../outside-cache"))
-                .GET()
+                .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -275,7 +291,7 @@ public class CacheEndpointTest {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/cache/@gwern/note.md?directory="
                         + URLEncoder.encode(absoluteCacheDir, StandardCharsets.UTF_8)))
-                .GET()
+                .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 

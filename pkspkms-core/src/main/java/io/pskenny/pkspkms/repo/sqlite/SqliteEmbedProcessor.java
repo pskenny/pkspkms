@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.sql.*;
+import java.util.List;
 import java.util.Map;
 
 // computed_props: links/wikilinks extracted from generated embed content.
@@ -55,33 +56,39 @@ public class SqliteEmbedProcessor {
             try (PreparedStatement selectStmt = conn.prepareStatement(selectSql);
                  PreparedStatement updateStmt = conn.prepareStatement(updateSql)) {
                 ResultSet rs = selectStmt.executeQuery();
-                WikilinkService wikilinkService = new WikilinkService(dbUrl);
                 int generated = 0;
                 int errors = 0;
 
-                while (rs.next()) {
-                    int id = rs.getInt("id");
-                    String text = rs.getString("original_match");
-                    String type = rs.getString("type");
-                    String generatedText = "";
-                    try {
-                        generatedText = generateEmbedContent(type, text);
-                    } catch (Exception ex) {
-                        logger.error("Couldn't generate Markdown text from {}: {}", type, text, ex);
-                        errors++;
-                    }
-                    if ("ERROR".equals(generatedText)) {
-                        errors++;
-                    } else if (!generatedText.isEmpty()) {
-                        generated++;
-                    }
-                    String properties = jsonMapper.writeValueAsString(markdownProcessor.parseToMap(generatedText, wikilinkService));
+                try (WikilinkService wikilinkService = new WikilinkService(dbUrl)) {
+                    // Single corpus load: one JSON parse per file for the whole
+                    // render pass — embeds evaluate in-process against it
+                    List<io.pskenny.pkspkms.io.PksFile> corpus = repository.loadCorpus();
 
-                    updateStmt.setString(1, generatedText);
-                    updateStmt.setString(2, properties);
-                    updateStmt.setInt(3, id);
-                    updateStmt.executeUpdate();
+                    while (rs.next()) {
+                        int id = rs.getInt("id");
+                        String text = rs.getString("original_match");
+                        String type = rs.getString("type");
+                        String generatedText = "";
+                        try {
+                            generatedText = generateEmbedContent(type, text, corpus);
+                        } catch (Exception ex) {
+                            logger.error("Couldn't generate Markdown text from {}: {}", type, text, ex);
+                            errors++;
+                        }
+                        if ("ERROR".equals(generatedText)) {
+                            errors++;
+                        } else if (!generatedText.isEmpty()) {
+                            generated++;
+                        }
+                        String properties = jsonMapper.writeValueAsString(markdownProcessor.parseToMap(generatedText, wikilinkService));
+
+                        updateStmt.setString(1, generatedText);
+                        updateStmt.setString(2, properties);
+                        updateStmt.setInt(3, id);
+                        updateStmt.executeUpdate();
+                    }
                 }
+
                 conn.commit();
                 logger.info("Generated {} embeds in {}ms (errors: {})",
                         generated, (System.nanoTime() - startNs) / 1_000_000, errors);
@@ -95,29 +102,29 @@ public class SqliteEmbedProcessor {
         }
     }
 
-    private String generateEmbedContent(String type, String text) {
+    private String generateEmbedContent(String type, String text, List<io.pskenny.pkspkms.io.PksFile> corpus) {
         if ("luabase".equalsIgnoreCase(type)) {
-            return processLuaBaseText(text);
+            return processLuaBaseText(text, corpus);
         }
         if ("base".equalsIgnoreCase(type)) {
-            return processBaseMap(naiveBaseToLuaBaseConverter.convertToMap(text));
+            return processBaseMap(naiveBaseToLuaBaseConverter.convertToMap(text), corpus);
         }
         return "";
     }
 
-    private String processLuaBaseText(String text) {
+    private String processLuaBaseText(String text, List<io.pskenny.pkspkms.io.PksFile> corpus) {
         try {
             Map<String, Object> spec = new YamlParser().parse(text);
-            return processor.process(spec, repository);
+            return processor.processOverCorpus(spec, corpus);
         } catch (Exception e) {
             logger.error("Couldn't process Base text: {}", text, e);
         }
         return "ERROR";
     }
 
-    private String processBaseMap(Map<String, Object> spec) {
+    private String processBaseMap(Map<String, Object> spec, List<io.pskenny.pkspkms.io.PksFile> corpus) {
         try {
-            return processor.process(spec, repository);
+            return processor.processOverCorpus(spec, corpus);
         } catch (Exception e) {
             logger.error("Couldn't process Base spec: {}", spec);
         }

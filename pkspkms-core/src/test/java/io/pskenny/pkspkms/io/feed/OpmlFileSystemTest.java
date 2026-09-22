@@ -39,9 +39,17 @@ public class OpmlFileSystemTest {
     private OpmlFileSystem fsWithLocalFeed(String feedXml) throws IOException {
         Path feedFile = vault.resolve("fixture-feed.xml");
         Files.writeString(feedFile, feedXml);
-        // Non-http sources are treated as local paths, so the fixture feed needs no network
-        String opml = OPML.replace("LOCAL_FEED", feedFile.toAbsolutePath().toString());
-        return new OpmlFileSystem(opml.getBytes(StandardCharsets.UTF_8), 1000L, FeedFetcher.loader());
+        // Subscriptions must be http(s) (B22); the injected loader maps the
+        // fixture URL to the local fixture file
+        String opml = OPML.replace("LOCAL_FEED", "https://fixture.test/feed.xml");
+        return new OpmlFileSystem(opml.getBytes(StandardCharsets.UTF_8), 1000L,
+                source -> source.equals("https://fixture.test/feed.xml")
+                        ? Files.readAllBytes(feedFile)
+                        : throwUnresolvable(source));
+    }
+
+    private byte[] throwUnresolvable(String source) throws IOException {
+        throw new IOException("Unresolvable feed source: " + source);
     }
 
     @Test
@@ -122,13 +130,16 @@ public class OpmlFileSystemTest {
                 <?xml version="1.0"?>
                 <opml version="2.0"><body>
                   <outline text="Dead" xmlUrl="/nonexistent/dead-feed.xml"/>
-                  <outline text="Good" xmlUrl="%s"/>
+                  <outline text="Good" xmlUrl="https://fixture.test/good.xml"/>
                   <outline text="Survivor" _note="outliner branch"/>
                 </body></opml>
-                """.formatted(goodFeed.toAbsolutePath());
+                """;
 
         // One dead feed must not abort the whole vault (large NewsBlur exports)
-        OpmlFileSystem fs = new OpmlFileSystem(opml.getBytes(StandardCharsets.UTF_8), 1000L, FeedFetcher.loader());
+        OpmlFileSystem fs = new OpmlFileSystem(opml.getBytes(StandardCharsets.UTF_8), 1000L,
+                source -> source.equals("https://fixture.test/good.xml")
+                        ? Files.readAllBytes(goodFeed)
+                        : throwUnresolvable(source));
 
         assertTrue(fs.exists("Good.md"), "good subscription mounts");
         assertTrue(fs.exists("Good/Ep.md"), "good feed items mount");

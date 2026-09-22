@@ -9,7 +9,7 @@ see [Querying](Querying.md). Malformed queries return HTTP 400 with a JSON error
 
 Liveness check. Returns `200` with an empty body.
 
-## `/files/list` and `/files/search`
+## `/files/list`
 
 Query the vault. `?query=` filters by properties; an empty or missing `query`
 matches every file. Responses stream JSON:
@@ -26,8 +26,6 @@ matches every file. Responses stream JSON:
   "resultSize": 1
 }
 ```
-
-`/files/search` is an alias of `/files/list`.
 
 ## `/files/list/graph`
 

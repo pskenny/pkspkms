@@ -1,34 +1,44 @@
+-- Pure-Lua list membership (lists are Lua tables after coercion)
+local function listHas(t, v)
+    for i = 1, #t do
+        if t[i] == v then
+            return true
+        end
+    end
+    return false
+end
+
 function hasProperty(file, prop_name)
-    return file:get(prop_name) ~= nil
+    return file[prop_name] ~= nil
 end
 
 
 -- Scalar equality; list properties are matched by hasPropertyValueIn
 function hasPropertyValue(file, prop_name, value)
-    local val = file:get(prop_name)
-    if type(val) == "userdata" then
-        return val:contains(value)
+    local val = file[prop_name]
+    if type(val) == "table" then
+        return listHas(val, value)
     end
     return val == value
 end
 
 -- Substring match on scalar text; list membership (exact) for lists
 function hasPropertyContaining(file, prop_name, value)
-    local val = file:get(prop_name)
+    local val = file[prop_name]
     if val == nil then
         return false
     end
-    if type(val) == "userdata" then
-        return val:contains(value)
+    if type(val) == "table" then
+        return listHas(val, value)
     end
     return string.find(tostring(val), tostring(value), 1, true) ~= nil
 end
 
 function hasPropertyValueIn(file, prop_name, values)
-    local val = file:get(prop_name)
-    if type(val) == "userdata" then
+    local val = file[prop_name]
+    if type(val) == "table" then
         for i = 1, #values do
-            if val:contains(values[i]) then
+            if listHas(val, values[i]) then
                 return true
             end
         end
@@ -44,7 +54,7 @@ end
 
 
 function getPropertyValue(file, prop_name, default_value)
-  local val = file:get(prop_name)
+  local val = file[prop_name]
   if val == nil then
       return default_value
   end
@@ -53,7 +63,7 @@ end
 
 -- Numeric comparisons: missing or non-numeric property never matches
 local function compareNumeric(file, prop_name, value, cmp)
-    local val = file:get(prop_name)
+    local val = file[prop_name]
     if val == nil then
         return false
     end
@@ -82,7 +92,7 @@ end
 
 -- Obsidian file.* derivatives, derived from filePath
 function fileField(file, field)
-    local path = file:get("filePath")
+    local path = file["filePath"]
     if path == nil then
         return ""
     end
@@ -104,7 +114,7 @@ function fileFieldStartsWith(file, field, prefix)
 end
 
 function hasPropertyValueStartsWith(file, prop_name, prefix)
-    local val = file:get(prop_name)
+    local val = file[prop_name]
     if val == nil then
         return false
     end
@@ -113,7 +123,7 @@ end
 
 -- Obsidian file.inFolder: filePath inside folder (prefix .. "/"); "" matches all
 function fileInFolder(file, folder)
-    local path = file:get("filePath")
+    local path = file["filePath"]
     if path == nil then
         return false
     end
@@ -127,33 +137,26 @@ function fileInFolder(file, folder)
 end
 
 function hasEmptyProperty(file, prop_name)
-    local val = file:get(prop_name)
+    local val = file[prop_name]
     if val == nil then
         return true
     end
     if type(val) == "string" then
         return val == ""
     end
-    if type(val) == "userdata" then
-        local ok, size = pcall(function() return val:size() end)
-        if ok then
-            return size == 0
-        end
-        local ok2, s = pcall(function() return val:toString() end)
-        if ok2 then
-            return s == ""
-        end
+    if type(val) == "table" then
+        return #val == 0
     end
     return false
 end
 
 function hasPropertyContainingAll(file, prop_name, values)
-    local val = file:get(prop_name)
-    if type(val) ~= "userdata" then
+    local val = file[prop_name]
+    if type(val) ~= "table" then
         return false
     end
     for i = 1, #values do
-        if not val:contains(values[i]) then
+        if not listHas(val, values[i]) then
             return false
         end
     end

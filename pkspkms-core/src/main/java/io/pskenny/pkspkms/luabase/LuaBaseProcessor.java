@@ -29,13 +29,32 @@ public class LuaBaseProcessor {
         return render(viewSpec, sortedFiles);
     }
 
-    public String process(Map<String, Object> spec, PksFileRepository repository) {
+    // Single-pass embed rendering: one corpus (already-parsed PksFiles), one
+    // compiled filter, evaluated in-process per file. Same expression semantics
+    // as the old lua_eval SQL path — minus the JNI round-trip and per-row JSON
+    // re-parsing. Invalid filters render empty, mirroring the old logged skip.
+    public String processOverCorpus(Map<String, Object> spec, List<PksFile> corpus) {
         addFormulas(spec);
         ViewSpec viewSpec = ViewSpec.from(spec);
         String luaFilter = filterYamlToExpression(viewSpec.filters());
-        List<PksFile> files = repository.searchWithLuaFilter(luaFilter);
-        List<PksFile> sortedFiles = applySort(viewSpec, files);
-        return render(viewSpec, sortedFiles);
+        try {
+            luaBaseInterpreter.validateExpression(luaFilter);
+        } catch (RuntimeException e) {
+            logger.warn("Invalid Lua filter syntax, rendering headers only: {}", e.getMessage());
+            return render(viewSpec, new ArrayList<>());
+        }
+
+        List<PksFile> matches = new ArrayList<>();
+        for (PksFile file : corpus) {
+            try {
+                if (luaBaseInterpreter.evaluateExpression(luaFilter, file.getMutableProperties())) {
+                    matches.add(file);
+                }
+            } catch (RuntimeException e) {
+                // per-row failure = non-match, exactly as the JNI callback did
+            }
+        }
+        return render(viewSpec, applySort(viewSpec, matches));
     }
 
     public void validateLuaFilter(String luaFilter) {

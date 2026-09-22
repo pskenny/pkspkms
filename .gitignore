@@ -37,3 +37,15 @@ build/
 
 ### SQLite ###
 *.db
+*.db-shm
+*.db-wal
+
+### Plugin cache / personal scratch ###
+.pkspkms-cache/
+test/temp/
+__pycache__/
+media/
+connection_proliferation.py
+.profileconfig.json
+*.jfr
+profile.jfr
