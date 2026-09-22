@@ -68,6 +68,19 @@ public class FileUtil {
         return path.toFile().exists();
     }
 
+    public static long countFiles(Path dir) {
+        if (dir == null || !Files.exists(dir) || !Files.isDirectory(dir)) {
+            return 0;
+        }
+        try {
+            try (var stream = Files.walk(dir)) {
+                return stream.filter(Files::isRegularFile).count();
+            }
+        } catch (IOException e) {
+            return 0;
+        }
+    }
+
     private static Path resolveFromProjectRoot(String relativePath) {
         Path start = Paths.get(System.getProperty("user.dir")).toAbsolutePath();
         Path current = start;

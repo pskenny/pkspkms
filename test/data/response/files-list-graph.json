@@ -1,12 +1,13 @@
 {
   "resultSize" : 2,
   "files" : [ {
+    "links" : [ "test3-graph.md" ],
+    "tags" : [ "Tag1", "Tag2" ],
+    "filePath" : "test2-graph.md",
+    "backlinks" : [ "test-graph.md" ]
+  }, {
     "links" : [ "test2-graph.md", "test1-no-existy.md" ],
     "tags" : [ "Tag1" ],
     "filePath" : "test-graph.md"
-  }, {
-    "links" : [ "test3-graph.md" ],
-    "tags" : [ "Tag1", "Tag2" ],
-    "filePath" : "test2-graph.md"
   } ]
 }

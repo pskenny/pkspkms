@@ -1,0 +1,409 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "PKSPKMS",
+    "version": "0.1.0",
+    "description": "Single-user HTTP API for a Zettelkasten-style personal knowledge management vault. Query files by YAML frontmatter properties (Lucene-style syntax), pull virtual-vault files into a cache, and serve the bundled web UI. Loopback-only by default; a bearer token (generated at ~/.config/pkspkms/token) is required on every route except /ping when the server runs with token auth enabled."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Default local server (configurable with --port)"
+    }
+  ],
+  "paths": {
+    "/ping": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Liveness check",
+        "operationId": "ping",
+        "responses": {
+          "200": {
+            "description": "Server is up",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": ""
+              }
+            }
+          }
+        }
+      }
+    },
+    "/files/list": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Query files by property",
+        "operationId": "listFiles",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching files with their properties",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/files/list/graph": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Query files, reduced to graph shape",
+        "operationId": "listFilesGraph",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching files reduced to filePath, links, backlinks and tags",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/files/manifest": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Per-virtual-vault file manifest",
+        "description": "Groups {filePath, blake3} pairs per virtual-vault alias for pkspkms:// targets. Main-vault rows (vault_alias_id null) are excluded: /cache only serves registered aliases.",
+        "operationId": "filesManifest",
+        "responses": {
+          "200": {
+            "description": "Alias to manifest entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManifestResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cache/{address}/{location}": {
+      "post": {
+        "tags": [
+          "vault"
+        ],
+        "summary": "Copy a file from a virtual vault into the cache directory",
+        "description": "Copies {location} from the virtual vault registered under {address} into {directory}, hashed with BLAKE3, and inserts the cached file into the index. Intended for the planned Obsidian plugin. POST only \u2014 drive-by GETs cannot mutate the vault.",
+        "operationId": "cacheFile",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Virtual vault alias (as passed to --virtual-vault)"
+          },
+          {
+            "name": "location",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "File location within the virtual vault"
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Directory to cache the copy into. Relative paths resolve under the vault (recommended: .pkspkms-cache); absolute paths are honoured when inside the vault and rejected otherwise."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cached file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing 'directory' parameter or invalid cache path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown alias or file not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webui": {
+      "get": {
+        "tags": [
+          "ui"
+        ],
+        "summary": "Browser UI",
+        "operationId": "webui",
+        "responses": {
+          "301": {
+            "description": "Redirects to /webui/index.html"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "Query": {
+        "name": "query",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "default": ""
+        },
+        "description": "Lucene-style property query, e.g. tags:PKSPKMS, filePath:*.md, NOT tags:Archive. Empty or missing matches every file. Malformed queries return HTTP 400."
+      }
+    },
+    "schemas": {
+      "File": {
+        "type": "object",
+        "description": "File properties: generated keys plus any YAML frontmatter property. Tags are observed as arrays; scalar-typed frontmatter (dates, checkboxes, numbers) appears as scalars.",
+        "required": [
+          "filePath"
+        ],
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Vault-relative path, e.g. Notes/Task.md"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Resolved outgoing link targets"
+          },
+          "backlinks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "FileListResponse": {
+        "type": "object",
+        "required": [
+          "files",
+          "resultSize"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/File"
+            }
+          },
+          "resultSize": {
+            "type": "integer"
+          }
+        }
+      },
+      "GraphFile": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "filePath": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "backlinks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "GraphResponse": {
+        "type": "object",
+        "required": [
+          "files",
+          "resultSize"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GraphFile"
+            }
+          },
+          "resultSize": {
+            "type": "integer"
+          }
+        }
+      },
+      "CacheResult": {
+        "type": "object",
+        "required": [
+          "status",
+          "file",
+          "blake3"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success"
+            ]
+          },
+          "file": {
+            "type": "string",
+            "description": "Cached file path relative to the vault"
+          },
+          "blake3": {
+            "type": "string",
+            "description": "BLAKE3 hash of the cached file"
+          }
+        }
+      },
+      "ManifestResponse": {
+        "type": "object",
+        "description": "Alias to manifest entries; an alias with no files has an empty array",
+        "additionalProperties": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/ManifestFile"
+          }
+        }
+      },
+      "ManifestFile": {
+        "type": "object",
+        "required": [
+          "filePath"
+        ],
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "@alias/-prefixed path"
+          },
+          "blake3": {
+            "type": "string"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "status",
+          "message"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "error"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

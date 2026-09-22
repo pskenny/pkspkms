@@ -8,6 +8,8 @@ import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -21,10 +23,24 @@ import java.util.stream.Collectors;
 public class NaiveBaseToLuaBaseConverter {
     private static final Logger logger = LoggerFactory.getLogger(NaiveBaseToLuaBaseConverter.class);
 
+    // --- SnakeYAML instance reuse (SafeConstructor is not thread-safe; one per thread) ---
+    private static final ThreadLocal<Yaml> YAML_TL =
+            ThreadLocal.withInitial(() -> new Yaml(new SafeConstructor(new LoaderOptions())));
+
     // --- Regex Patterns ---
-    private static final Pattern CONTAINS_ANY_PATTERN = Pattern.compile("([\\w\\.]+)\\.containsAny\\((.*)\\)");
+    private static final Pattern CONTAINS_ANY_PATTERN = Pattern.compile("([\\w\\.]+)\\.contains(?:All|Any)?\\((.*)\\)");
     private static final Pattern VALUE_PATTERN = Pattern.compile("\"([^\"]+)\"");
     private static final Pattern EQUALS_PATTERN = Pattern.compile("([\\w\\.]+)\\s*==\\s*\"([^\"]+)\"");
+    private static final Pattern ARRAY_EQUALS_PATTERN =
+            Pattern.compile("([\\w\\.]+)\\s*==\\s*\\[([^\\]]*)\\]");
+    private static final Pattern STARTS_WITH_PATTERN =
+            Pattern.compile("([\\w.]+)\\.startsWith\\(\"([^\"]*)\"\\)");
+    private static final Pattern IS_EMPTY_PATTERN =
+            Pattern.compile("([\\w.]+)\\.isEmpty\\(\\)");
+    private static final Pattern IN_FOLDER_PATTERN =
+            Pattern.compile("([\\w.]+)\\.inFolder\\(\"([^\"]*)\"\\)");
+    private static final Pattern COMPARISON_PATTERN =
+            Pattern.compile("([\\w\\.]+)\\s*(>=|<=|>|<)\\s*(-?\\d+(?:\\.\\d+)?)");
 
     // --- Embedded Lua Code Block Templates ---
     private static final String LUA_TAGS_TEMPLATE =
@@ -62,6 +78,16 @@ public class NaiveBaseToLuaBaseConverter {
             this.pksKey = pksKey;
         }
 
+        private static final Map<String, String> LOOKUP;
+        static {
+            Map<String, String> m = new HashMap<>();
+            for (PropertyMapping pm : values()) {
+                m.put(pm.obsidianKey, pm.pksKey);
+                m.put(pm.pksKey, pm.pksKey);
+            }
+            LOOKUP = Collections.unmodifiableMap(m);
+        }
+
         public static Optional<PropertyMapping> fromObsidian(String key) {
             return Arrays.stream(values())
                     .filter(m -> m.obsidianKey.equals(key) || m.pksKey.equals(key))
@@ -69,22 +95,91 @@ public class NaiveBaseToLuaBaseConverter {
         }
 
         public static String resolve(String key) {
-            return fromObsidian(key)
-                    .map(m -> {
-                        logger.debug("Obsidian specific property found, mapped from {}", key);
-                        return m.pksKey;
-                    })
-                    .orElse(key);
+            String mapped = LOOKUP.get(key);
+            if (mapped != null && !mapped.equals(key)) {
+                logger.debug("Obsidian specific property found, mapped from {}", key);
+            }
+            return mapped != null ? mapped : key;
         }
     }
 
     // --- Immutable Intermediate Expression State ---
-    private record ParsedQuery(String property, List<String> values, boolean isNegated, boolean isContainsAny) {
+    private static final class ParsedQuery {
+        private final String property;
+        private final List<String> values;
+        private final boolean isNegated;
+        private final boolean isContainsAny;
+        private final ComparisonOp comparisonOp;
+        private final boolean isContainsAll;
+        private final boolean isContains;
+
+        // Numeric comparison operators, mapped to their Lua function suffix
+        private enum ComparisonOp {
+            NONE(""), GT("GreaterThan"), GTE("GreaterThanOrEqual"),
+            LT("LessThan"), LTE("LessThanOrEqual");
+
+            private static final Map<String, ComparisonOp> BY_SYMBOL = Map.of(
+                    ">", GT, ">=", GTE, "<", LT, "<=", LTE);
+
+            private final String luaFunctionSuffix;
+
+            ComparisonOp(String luaFunctionSuffix) {
+                this.luaFunctionSuffix = luaFunctionSuffix;
+            }
+
+            String luaFunctionSuffix() {
+                return luaFunctionSuffix;
+            }
+
+            static ComparisonOp fromSymbol(String symbol) {
+                return BY_SYMBOL.getOrDefault(symbol, NONE);
+            }
+        }
+
+        ParsedQuery(String property, List<String> values, boolean isNegated, boolean isContainsAny) {
+            this(property, values, isNegated, isContainsAny, ComparisonOp.NONE, false, false);
+        }
+
+        ParsedQuery(String property, List<String> values, boolean isNegated, boolean isContainsAny,
+                    ComparisonOp comparisonOp) {
+            this(property, values, isNegated, isContainsAny, comparisonOp, false, false);
+        }
+
+        ParsedQuery(String property, List<String> values, boolean isNegated, boolean isContainsAny,
+                    ComparisonOp comparisonOp, boolean isContainsAll, boolean isContains) {
+            this.property = property;
+            this.values = values;
+            this.isNegated = isNegated;
+            this.isContainsAny = isContainsAny;
+            this.comparisonOp = comparisonOp;
+            this.isContainsAll = isContainsAll;
+            this.isContains = isContains;
+        }
+
+        String property() { return property; }
+        List<String> values() { return values; }
+        boolean isNegated() { return isNegated; }
+        boolean isContainsAny() { return isContainsAny; }
+        ComparisonOp comparisonOp() { return comparisonOp; }
+        boolean isContainsAll() { return isContainsAll; }
+        boolean isContains() { return isContains; }
+
+        public String formatLuaArray() {
+            return values.stream()
+                    .map(v -> "\"" + v + "\"")
+                    .collect(Collectors.joining(", ", "{", "}"));
+        }
+
         public static Optional<ParsedQuery> parse(String jsText) {
             if (jsText == null || jsText.isEmpty()) return Optional.empty();
 
             boolean negated = jsText.startsWith("!");
-            String cleanText = negated ? jsText.substring(1) : jsText;
+            String cleanText = negated ? jsText.substring(1).trim() : jsText;
+
+            // Strip one layer of enclosing parens, e.g. !(file.size > 100)
+            if (cleanText.startsWith("(") && cleanText.endsWith(")")) {
+                cleanText = cleanText.substring(1, cleanText.length() - 1).trim();
+            }
 
             // Check translation mapping matches up-front
             for (PropertyMapping mapping : PropertyMapping.values()) {
@@ -94,7 +189,7 @@ public class NaiveBaseToLuaBaseConverter {
                 }
             }
 
-            // 1. Try matching containsAny
+            // 1. Try matching contains / containsAll / containsAny
             Matcher containsMatcher = CONTAINS_ANY_PATTERN.matcher(cleanText);
             if (containsMatcher.matches()) {
                 String property = PropertyMapping.resolve(containsMatcher.group(1));
@@ -103,10 +198,38 @@ public class NaiveBaseToLuaBaseConverter {
                 while (valMatcher.find()) {
                     values.add(valMatcher.group(1));
                 }
-                return Optional.of(new ParsedQuery(property, values, negated, true));
+                boolean isContainsAll = containsMatcher.group().contains("containsAll");
+                boolean isContainsAny = containsMatcher.group().contains("containsAny") || values.size() > 1;
+                boolean isContains = !isContainsAll && !isContainsAny;
+                return Optional.of(new ParsedQuery(property, values, negated, isContainsAny, ComparisonOp.NONE, isContainsAll, isContains));
             }
 
-            // 2. Try matching simple equality
+            // 2. Try matching numeric comparison (>, >=, <, <=)
+            Matcher comparisonMatcher = COMPARISON_PATTERN.matcher(cleanText);
+            if (comparisonMatcher.matches()) {
+                String property = PropertyMapping.resolve(comparisonMatcher.group(1));
+                ComparisonOp op = ComparisonOp.fromSymbol(comparisonMatcher.group(2));
+                return Optional.of(new ParsedQuery(property, List.of(comparisonMatcher.group(3)),
+                        negated, false, op));
+            }
+
+            // 3. Try matching array equality: prop == ["a", "b"]
+            Matcher arrayEqualsMatcher = ARRAY_EQUALS_PATTERN.matcher(cleanText);
+            if (arrayEqualsMatcher.matches()) {
+                String property = PropertyMapping.resolve(arrayEqualsMatcher.group(1));
+                List<String> values = new ArrayList<>();
+                for (String v : arrayEqualsMatcher.group(2).split(",")) {
+                    String stripped = v.trim().replaceAll("^['\"]|['\"]$", "");
+                    if (!stripped.isEmpty()) {
+                        values.add(stripped);
+                    }
+                }
+                if (!values.isEmpty()) {
+                    return Optional.of(new ParsedQuery(property, values, negated, true));
+                }
+            }
+
+            // 4. Try matching simple equality
             Matcher equalsMatcher = EQUALS_PATTERN.matcher(cleanText);
             if (equalsMatcher.matches()) {
                 String property = PropertyMapping.resolve(equalsMatcher.group(1));
@@ -116,24 +239,104 @@ public class NaiveBaseToLuaBaseConverter {
 
             return Optional.empty();
         }
-
-        public String formatLuaArray() {
-            return values.stream()
-                    .map(v -> "\"" + v + "\"")
-                    .collect(Collectors.joining(", ", "{", "}"));
-        }
     }
 
     // --- Base Application Flow ---
 
     public String convert(String base) {
-        Yaml yaml = new Yaml(new SafeConstructor(new LoaderOptions()));
-        Map<String, Object> yamlMap = yaml.load(base);
+        Map<String, Object> yamlMap = YAML_TL.get().load(YamlParser.expandLeadingTabs(base));
         List<?> views = (List<?>) yamlMap.get("views");
         StringBuilder luaBaseYaml = new StringBuilder();
 
         addViews(luaBaseYaml, views);
         return luaBaseYaml.toString();
+    }
+
+    /**
+     * Fast path: parses {@code base} and converts it to a LuaBase spec map in-place,
+     * skipping YAML re-serialization. The returned map is ready to pass directly to
+     * {@link io.pskenny.pkspkms.luabase.LuaBaseProcessor#process(Map, io.pskenny.pkspkms.repo.PksFileRepository)}.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> convertToMap(String base) {
+        Map<String, Object> yamlMap = YAML_TL.get().load(YamlParser.expandLeadingTabs(base));
+        List<Map<String, Object>> views = (List<Map<String, Object>>) yamlMap.get("views");
+        if (views == null || views.isEmpty()) return yamlMap;
+
+        Map<String, Object> view = views.get(0);
+        if (view == null) return yamlMap;
+
+        // Drop keys that LuaBaseProcessor doesn't use (name, columnSize, limit, …)
+        // by building a clean replacement map with only the keys we translate.
+        Map<String, Object> converted = new java.util.LinkedHashMap<>();
+        converted.put("type", view.get("type"));
+
+        // filters — view-level, else inherit top-level (Obsidian shared filters)
+        Map<String, Object> filters = (Map<String, Object>) view.get("filters");
+        if (filters == null || filters.isEmpty()) {
+            filters = (Map<String, Object>) yamlMap.get("filters");
+        }
+        if (filters != null && !filters.isEmpty()) {
+            Map<String, Object> convertedFilters = convertFilters(filters);
+            if (!convertedFilters.isEmpty()) {
+                converted.put("filters", convertedFilters);
+            }
+        }
+
+        // order
+        List<?> order = (List<?>) view.get("order");
+        if (order != null && !order.isEmpty()) {
+            List<String> convertedOrder = new ArrayList<>(order.size());
+            for (Object o : order) {
+                convertedOrder.add(stripYamlQuotes(tryAndConvertValue(o.toString())));
+            }
+            converted.put("order", convertedOrder);
+        }
+
+        // sort — resolve property names but leave the structure intact
+        List<Map<String, Object>> sort = (List<Map<String, Object>>) view.get("sort");
+        if (sort != null && !sort.isEmpty()) {
+            List<Map<String, Object>> convertedSort = new ArrayList<>(sort.size());
+            for (Map<String, Object> sortItem : sort) {
+                Map<String, Object> convertedItem = new java.util.LinkedHashMap<>();
+                for (Map.Entry<String, Object> entry : sortItem.entrySet()) {
+                    String v = entry.getValue() != null ? entry.getValue().toString() : null;
+                    convertedItem.put(entry.getKey(),
+                            v != null ? PropertyMapping.resolve(v) : null);
+                }
+                convertedSort.add(convertedItem);
+            }
+            converted.put("sort", convertedSort);
+        }
+
+        // formulas (pass through unchanged if present)
+        Object formulas = view.get("formulas");
+        if (formulas != null) converted.put("formulas", formulas);
+
+        // Replace the single view with the cleaned, converted one
+        views.set(0, converted);
+        return yamlMap;
+    }
+
+    // Converts a filter map (and/or lists of Obsidian expressions) into Lua calls,
+    // preserving the logical keys.
+    private Map<String, Object> convertFilters(Map<String, Object> filters) {
+        Map<String, Object> convertedFilters = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : filters.entrySet()) {
+            if (entry.getValue() instanceof List<?> values && isLogicalKey(entry.getKey())) {
+                List<String> converted = new ArrayList<>(values.size());
+                for (Object v : values) {
+                    converted.add(stripYamlQuotes(tryAndConvertExpression(v.toString())));
+                }
+                convertedFilters.put(entry.getKey(), converted);
+            }
+        }
+        return convertedFilters;
+    }
+
+    private boolean isLogicalKey(String key) {
+        return key.equalsIgnoreCase("and") || key.equalsIgnoreCase("or")
+                || key.equalsIgnoreCase("all") || key.equalsIgnoreCase("any");
     }
 
     private void addViews(StringBuilder sb, List<?> views) {
@@ -196,14 +399,78 @@ public class NaiveBaseToLuaBaseConverter {
         }
     }
 
+    // Forms that don't fit ParsedQuery: file.inFolder, startsWith, isEmpty.
+    // Checked before PropertyMapping rewriting so file.name/basename/path keep their meaning.
+    private String trySpecialForms(String jsText) {
+        if (jsText == null || jsText.isEmpty()) {
+            return null;
+        }
+
+        boolean negated = jsText.startsWith("!");
+        String clean = negated ? jsText.substring(1).trim() : jsText;
+        if (clean.startsWith("(") && clean.endsWith(")")) {
+            clean = clean.substring(1, clean.length() - 1).trim();
+        }
+        String maybeNegate = negated ? " not " : "";
+
+        Matcher inFolder = IN_FOLDER_PATTERN.matcher(clean);
+        if (inFolder.matches()) {
+            return "'" + maybeNegate + "fileInFolder(file, \"" + inFolder.group(2) + "\")'";
+        }
+
+        Matcher startsWith = STARTS_WITH_PATTERN.matcher(clean);
+        if (startsWith.matches()) {
+            String prefix = startsWith.group(2);
+            switch (startsWith.group(1)) {
+                case "file.name": return "'" + maybeNegate + "fileFieldStartsWith(file, \"name\", \"" + prefix + "\")'";
+                case "file.basename": return "'" + maybeNegate + "fileFieldStartsWith(file, \"basename\", \"" + prefix + "\")'";
+                case "file.ext": return "'" + maybeNegate + "fileFieldStartsWith(file, \"ext\", \"" + prefix + "\")'";
+                case "file.path": case "filePath": case "path":
+                    return "'" + maybeNegate + "fileFieldStartsWith(file, \"path\", \"" + prefix + "\")'";
+                default:
+                    return "'" + maybeNegate + "hasPropertyValueStartsWith(file, \"" + startsWith.group(1) + "\", \"" + prefix + "\")'";
+            }
+        }
+
+        Matcher isEmpty = IS_EMPTY_PATTERN.matcher(clean);
+        if (isEmpty.matches()) {
+            return "'" + maybeNegate + "hasEmptyProperty(file, \"" + isEmpty.group(1) + "\")'";
+        }
+
+        return null;
+    }
+
     // --- Refactored Translation Targets ---
 
     public String tryAndConvertExpression(String jsText) {
+        String special = trySpecialForms(jsText);
+        if (special != null) {
+            return special;
+        }
         return ParsedQuery.parse(jsText)
                 .map(query -> {
                     if (query.values().isEmpty()) return jsText;
 
                     String maybeNegate = query.isNegated() ? " not " : "";
+
+                    // Numeric comparison: value stays unquoted
+                    if (query.comparisonOp() != ParsedQuery.ComparisonOp.NONE) {
+                        String fn = "hasPropertyValue" + query.comparisonOp().luaFunctionSuffix();
+                        return "'" + maybeNegate + fn + "(file, \"" + query.property()
+                                + "\", " + query.values().get(0) + ")'";
+                    }
+
+                    if (query.isContainsAll()) {
+                        return "'" + maybeNegate + "hasPropertyContainingAll(file, \"" + query.property()
+                                + "\", " + query.formatLuaArray() + ")'";
+                    }
+
+                    // Plain .contains: substring match on text (Obsidian semantics)
+                    if (query.isContains()) {
+                        return "'" + maybeNegate + "hasPropertyContaining(file, \"" + query.property()
+                                + "\", \"" + query.values().get(0) + "\")'";
+                    }
+
                     String functionName = query.isContainsAny() && query.values().size() > 1
                             ? "hasPropertyValueIn" : "hasPropertyValue";
 
@@ -244,286 +511,17 @@ public class NaiveBaseToLuaBaseConverter {
 
         return maybeNegate + "'getPropertyValue(file, \"" + resolvedProperty + "\", \"\"), \"" + resolvedProperty + "\"'";
     }
-}
 
-//package io.pskenny.pkspkms.luabase;
-//
-//import org.slf4j.Logger;
-//import org.slf4j.LoggerFactory;
-//import org.yaml.snakeyaml.Yaml;
-//
-//import java.util.ArrayList;
-//import java.util.Map;
-//import java.util.regex.Matcher;
-//import java.util.regex.Pattern;
-//
-//// Naively converts Obsidian Base text to LuaBase
-//public class NaiveBaseToLuaBaseConverter {
-//    private static final Logger logger = LoggerFactory.getLogger(NaiveBaseToLuaBaseConverter.class);
-//    public static final String FILE_NAME = "file.name";
-//
-//    // Does not include file.embeds or file.properties
-//    Map<String, String> obsidianPropertiesToPksProperties = Map.of(
-//            "file.tags", "tags",
-//            FILE_NAME, "filePath",
-//            "file.backlinks", "backlinks",
-//            "file.ctime", "creationDate",
-//            "file.ext", "ext",
-//            "file.folder", "folder",
-////            "file.file", "",
-//            "file.mtime", "modificationDate",
-//            "file.path", "path",
-//            "file.size", "size"
-//    );
-//
-//    public String convert(String base) {
-//        // parse, match and hope to God
-//        Map yaml = new Yaml().load(base);
-//        ArrayList views = (ArrayList) yaml.get("views");
-//        StringBuilder luaBaseYaml = new StringBuilder();
-//
-//        addViews(luaBaseYaml, views);
-////        convertFormulas(viewElement);
-////        convertSort(viewElement);
-//
-//        return luaBaseYaml.toString();
-//    }
-//
-//    private void addViews(StringBuilder sb, ArrayList views) {
-//        if(views == null || views.isEmpty()) {
-//            return;
-//        }
-//        sb.append("views:\n");
-//        Map firstViewElement = (Map) views.get(0);
-//
-//        if(firstViewElement == null) {
-//            return;
-//        }
-//
-//        // add table details
-//        addIfPresent(sb, "type", (String) firstViewElement.get("type"));
-//
-//        addFilters(sb, (Map<String, ArrayList>) firstViewElement.get("filters"));
-//        addOrder(sb, (ArrayList<String>) firstViewElement.get("order"));
-//        addSort(sb, (ArrayList<Map<String, String>>) firstViewElement.get("sort"));
-//    }
-//
-//    private void addIfPresent(StringBuilder sb, String property, String value) {
-//        if (value == null || value.isEmpty()) {
-//            return;
-//        }
-//        sb.append("  - " + property + ": ")
-//                .append(value)
-//                .append("\n");
-//    }
-//
-//    private void addFilters(StringBuilder sb, Map<String, ArrayList> filters) {
-//        if (filters == null || filters.isEmpty()) {
-//            return;
-//        }
-//        sb.append("    filters:\n");
-//
-//        for (Map.Entry<String, ArrayList> entry : filters.entrySet()) {
-//            switch (entry.getKey()) {
-//                case "and":
-//                    sb.append("      and:\n");
-//                    ArrayList values = entry.getValue();
-//                    for (Object value : values) {
-//                        sb.append("        - ")
-//                                .append(tryAndConvertExpression(value.toString()))
-//                                .append("\n");
-//                    }
-//                    break;
-//                case "or":
-//                    break;
-//                default:
-//                    break;
-//            }
-//        }
-//    }
-//
-//    private void addOrder(StringBuilder sb, ArrayList<String> order) {
-//        if (order == null || order.isEmpty()) {
-//            return;
-//        }
-//
-//        sb.append("    order:\n");
-//
-//        for (String o : order) {
-//            sb.append("      - ")
-//                    .append(tryAndConvertValue(o))
-//                    .append("\n");
-//        }
-//    }
-//
-//    private void addSort(StringBuilder sb, ArrayList<Map<String, String>> sort) {
-//        if (sort == null || sort.isEmpty()) {
-//            return;
-//        }
-//
-//        sb.append("    sort:\n");
-//        for (Map<String, String> m : sort) {
-//            sb.append("      - ");
-//            for (var entry : m.entrySet()) {
-//                String value = entry.getValue();
-//                if (obsidianPropertiesToPksProperties.containsKey(value)) {
-//                    value = obsidianPropertiesToPksProperties.get((value));
-//                }
-//                sb.append(entry.getKey()).append(": ").append(value).append("\n        ");
-//            }
-//        }
-//    }
-//
-//    // Visible for testing
-//    public String tryAndConvertExpression(String jsText) {
-//        if (jsText.isEmpty()) {
-//            return "";
-//        }
-//
-//        String maybeNegate = jsText.startsWith("!") ? " not " : "";
-//        if (!maybeNegate.isEmpty()) {
-//            jsText = jsText.substring(1);
-//        }
-//
-//        for (Map.Entry<String, String> entry : obsidianPropertiesToPksProperties.entrySet()) {
-//            if (jsText.startsWith(entry.getKey())) {
-//                jsText = jsText.replaceFirst(entry.getKey(), entry.getValue());
-//                break;
-//            }
-//        }
-//
-//        // Is a containsAny, with one or more values
-//        String containsAny = "([\\w\\.]+)\\.containsAny\\((.*)\\)";
-//        Pattern containsAnyPattern = Pattern.compile(containsAny);
-//        Matcher matcher = containsAnyPattern.matcher(jsText);
-//        if (matcher.matches()) {
-//            var property = matcher.group(1);
-//            var argsString = matcher.group(2);
-//
-//            // Extract all quoted values from the argument list
-//            java.util.List<String> values = new java.util.ArrayList<>();
-//            Pattern valuePattern = Pattern.compile("\"([^\"]+)\"");
-//            Matcher valueMatcher = valuePattern.matcher(argsString);
-//            while (valueMatcher.find()) {
-//                values.add(valueMatcher.group(1));
-//            }
-//
-//            if (values.isEmpty()) {
-//                return jsText; // couldn't parse values, return as-is
-//            }
-//
-//            // check and swap out Obsidian names
-//            if (obsidianPropertiesToPksProperties.containsKey(property)) {
-//                logger.debug("obsidian specific thing found, from " + property);
-//                property = obsidianPropertiesToPksProperties.get(property);
-//            }
-//
-//            if (values.size() == 1) {
-//                var value = values.get(0);
-//                if (property.equals("filePath")) {
-//                    return "'\"[[\" .. ( " + maybeNegate + " hasPropertyValue(file, \"" + property + "\", \"" + value + "\")) .. \"]]\"'";
-//                }
-//                return "'" + maybeNegate + "hasPropertyValue(file, \""+ property + "\", \"" + value + "\")'";
-//            } else {
-//                StringBuilder valuesArray = new StringBuilder("{");
-//                for (int i = 0; i < values.size(); i++) {
-//                    if (i > 0) valuesArray.append(", ");
-//                    valuesArray.append("\"").append(values.get(i)).append("\"");
-//                }
-//                valuesArray.append("}");
-//                if (property.equals("filePath")) {
-//                    return "'\"[[\" .. ( " + maybeNegate + " hasPropertyValueIn(file, \"" + property + "\", " + valuesArray + ")) .. \"]]\"'";
-//                }
-//                return "'" + maybeNegate + "hasPropertyValueIn(file, \""+ property + "\", " + valuesArray + ")'";
-//            }
-//        }
-//
-//        // Is a simple ==
-//        String equals = "([\\w\\.]+)\\s*==\\s*\"([^\"]+)\"";
-//        Pattern equalsPattern = Pattern.compile(equals);
-//        Matcher equalsMatcher = equalsPattern.matcher(jsText);
-//        var equalsMatched = equalsMatcher.matches();
-//        if (equalsMatched) {
-//            var property = equalsMatcher.group(1);
-//            var value = equalsMatcher.group(2);
-//            // check and swap out Obsidian names
-//            if (obsidianPropertiesToPksProperties.containsKey(property)) {
-//                logger.debug("obsidian specific thing found, from " + property);
-//                property = obsidianPropertiesToPksProperties.get(property);
-//
-//                if (property.equals("filePath")) {
-//                    return "'\"[[\" .. (" + maybeNegate + " hasPropertyValue(file, \"" + property + "\", \"" + value + "\")) .. \"]]\"'";
-//                }
-//            }
-//
-//            return "'" + maybeNegate + "hasPropertyValue(file, \""+ property + "\", \"" + value + "\")'";
-//        }
-//
-//        // check and swap out Obsidian names
-//        if (obsidianPropertiesToPksProperties.containsKey(jsText)) {
-//            logger.debug("Obsidian specific thing found, from " + jsText);
-//            jsText = obsidianPropertiesToPksProperties.get(jsText);
-//        }
-//
-//        return jsText;
-//    }
-//
-//    // Visible for testing
-//    private String tryAndConvertValue(String jsText) {
-//        if (jsText.isEmpty()) {
-//            return "";
-//        }
-//        String maybeNegate = jsText.startsWith("!") ? " not " : "";
-//
-//        // Is a containsAny, with one or more values
-//        String containsAny = "([\\w\\.]+)\\.containsAny\\((.*)\\)";
-//        Pattern containsAnyPattern = Pattern.compile(containsAny);
-//        Matcher matcher = containsAnyPattern.matcher(jsText);
-//        if (matcher.matches()) {
-//            var property = matcher.group(1);
-//            var argsString = matcher.group(2);
-//
-//            java.util.List<String> values = new java.util.ArrayList<>();
-//            Pattern valuePattern = Pattern.compile("\"([^\"]+)\"");
-//            Matcher valueMatcher = valuePattern.matcher(argsString);
-//            while (valueMatcher.find()) {
-//                values.add(valueMatcher.group(1));
-//            }
-//
-//            if (values.isEmpty()) {
-//                return jsText;
-//            }
-//
-//            if (obsidianPropertiesToPksProperties.containsKey(property)) {
-//                property = obsidianPropertiesToPksProperties.get(property);
-//            }
-//
-//            if (values.size() == 1) {
-//                return "'" + maybeNegate + " hasPropertyValue(file, \""+ property + "\", \"" + values.get(0) + "\")'";
-//            } else {
-//                StringBuilder valuesArray = new StringBuilder("{");
-//                for (int i = 0; i < values.size(); i++) {
-//                    if (i > 0) valuesArray.append(", ");
-//                    valuesArray.append("\"").append(values.get(i)).append("\"");
-//                }
-//                valuesArray.append("}");
-//                return "'" + maybeNegate + " hasPropertyValueIn(file, \""+ property + "\", " + valuesArray + ")'";
-//            }
-//        }
-//
-//        // check and swap out Obsidian names
-//        if (obsidianPropertiesToPksProperties.containsKey(jsText)) {
-//            logger.debug("obsidian specific thing found, from " + jsText);
-//            jsText = obsidianPropertiesToPksProperties.get(jsText);
-//        }
-//
-//        if (jsText.equals("filePath")) {
-//            return "'\"[[\" .. getPropertyValue(file, \"" + jsText + "\", \"\") .. \"]]\", \"" + jsText + "\"'";
-//        }
-//        else if (jsText.equals("tags")) {
-//            return "'table.concat( (function() local t = {}; local tags_array = (" + maybeNegate + " getPropertyValue(file, \"tags\", \"\") or {}):toArray(); for i=1, #tags_array do local v = tags_array[i]; table.insert(t, \"#\" .. v) end; return t end)(), \" \"), \"tags\"'";
-//        }
-//
-//        return maybeNegate +  "'getPropertyValue(file, \"" + jsText + "\", \"\"), \"" + jsText + "\"'";
-//    }
-//}
+    /**
+     * Strips the outer single-quote YAML scalar markers that {@link #tryAndConvertExpression}
+     * and {@link #tryAndConvertValue} add (e.g. {@code 'expr'} → {@code expr}).
+     * These quotes are only meaningful as YAML syntax; when building a Map directly
+     * they must be removed so the Lua interpreter receives the bare expression.
+     */
+    private static String stripYamlQuotes(String s) {
+        if (s != null && s.length() >= 2 && s.charAt(0) == '\'' && s.charAt(s.length() - 1) == '\'') {
+            return s.substring(1, s.length() - 1);
+        }
+        return s;
+    }
+}
