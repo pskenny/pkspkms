@@ -1,12 +1,33 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * This file is part of PKSPKMS.
+ * Copyright (C) 2026 Paul Kenny
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package io.pskenny.pkspkms.io.processor;
 
 import io.pskenny.pkspkms.io.fs.PkmsEntry;
 import io.pskenny.pkspkms.io.PksFile;
-import io.pskenny.pkspkms.io.processor.actions.WikilinkToMarkdownLinkAction;
-import io.pskenny.pkspkms.io.processor.markdown.MarkdownLinkReader;
-import io.pskenny.pkspkms.io.processor.markdown.MarkdownWikilinkReader;
+import io.pskenny.pkspkms.io.processor.markdown.BomStripper;
+import io.pskenny.pkspkms.io.processor.markdown.FlexmarkMarkdownExtractor;
+import io.pskenny.pkspkms.io.processor.markdown.MarkdownExtractor;
 import io.pskenny.pkspkms.io.processor.markdown.YamlFrontmatterReader;
-import io.pskenny.pkspkms.services.WikilinkService;
+import com.vladsch.flexmark.util.ast.Node;
+import com.vladsch.flexmark.util.ast.TextCollectingVisitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,21 +41,127 @@ import java.util.regex.Pattern;
 public class MarkdownProcessor {
     private static final Logger logger = LoggerFactory.getLogger(MarkdownProcessor.class);
 
+    // Text bigger than this stays unindexed (mirrors Export's inline cap)
+    static final int MAX_BODY_CHARS = 1_000_000;
+
+    // Extraction engine: spec-grammar commonmark AST + the wikilink
+    // postprocessor; LegacyMarkdownExtractor remains the parity oracle in tests
+    private final MarkdownExtractor extractor = new FlexmarkMarkdownExtractor();
+    private final YamlFrontmatterReader yamlFrontmatterReader;
+
+    // Comment on the retained legacy regex fields: the parity oracle
+    // (LegacyMarkdownExtractor) reads them; production extraction is AST-only
     public static final Pattern BASE_PATTERN = Pattern.compile("(?s)```base(.*?)```");
     public static final Pattern LUABASE_PATTERN = Pattern.compile("(?s)```luabase(.*?)```");
 
-    private final MarkdownLinkReader markdownLinkReader;
-    private final MarkdownWikilinkReader markdownWikilinkReader;
-    private final YamlFrontmatterReader yamlFrontmatterReader;
+    // Body extraction for the FTS index: raw content minus the frontmatter
+    // block, capped at 1 MB (over-cap → null = unindexed). RAW — feeds the
+    // extraction input; the FTS body is the same slice RENDERED TO TEXT
+    // (plainBody below, v6).
+    static String extractBody(String content) {
+        int end = frontmatterEnd(content);
+        String body = end == -1 ? content : content.substring(end);
+        return body.length() > MAX_BODY_CHARS ? null : body;
+    }
+
+    /**
+     * v6 FTS text: the raw body rendered to plain text — heading markers,
+     * emphasis, fences' syntax and link destinations drop, code-block content
+     * and link/wikilink label text stay. Same frontmatter strip + 1 MB clamp
+     * as the raw body. Runs only at parse+re-extract time; the loader persists
+     * it and FTS reads it.
+     */
+    static String plainBody(String rawBody) {
+        if (rawBody == null) {
+            return null;
+        }
+        Node document = PLAIN_PARSER.parse(rawBody);
+        return new TextCollectingVisitor().collectAndGetText(document);
+    }
+
+    private static final com.vladsch.flexmark.parser.Parser PLAIN_PARSER =
+            com.vladsch.flexmark.parser.Parser.builder().build();
+
+    // End index just past the frontmatter block, or -1 when absent.
+    // Delegate to the shared Frontmatter oracle (BUGS.md H4): a `---` inside
+    // a YAML value never closes the region, `----` never opens one — the
+    // handshake the raw indexOf("---", 3) body slice used to break.
+    private static int frontmatterEnd(String content) {
+        return io.pskenny.pkspkms.io.Frontmatter.endOf(content);
+    }
+
+    // wikilink-shaped value in a frontmatter entry: [[inner]] where inner
+    // holds no brackets; BRACKET-TRANSPARENT to YAML quoting (we scan the raw
+    // text, so quoted and unquoted forms both count — the v7 contract)
+    private static final Pattern FRONTMATTER_WIKILINK =
+            Pattern.compile("\\[\\[([^\\[\\]]+)\\]\\]");
+
+    /**
+     * v7 frontmatter link facts: wikilink-shaped strings in the frontmatter
+     * region join the graph exactly like body wikilinks — same span shape
+     * ({kind: "frontmatter", target, anchor?, display?, line, offset}) at
+     * FULL-content coordinates (no body-relative adjust — the region sits at
+     * the top of the file). Wiki-image prefixes ({@code ![[…]]}) skip.
+     */
+    static List<Map<String, Object>> frontmatterLinkSpans(String content) {
+        int frontEnd = frontmatterEnd(content);
+        if (frontEnd < 0) {
+            return List.of();
+        }
+        List<Map<String, Object>> spans = new ArrayList<>();
+        java.util.regex.Matcher m = FRONTMATTER_WIKILINK.matcher(content);
+        m.region(0, frontEnd);
+        while (m.find()) {
+            int at = m.start();
+            if (at > 0 && content.charAt(at - 1) == '!') {
+                continue; // embed prefix — not a link fact
+            }
+            String inner = m.group(1).strip();
+            if (inner.isBlank()) {
+                continue;
+            }
+            Map<String, Object> span = new LinkedHashMap<>();
+            span.put("kind", "frontmatter");
+            String beforePipe = inner.split("\\|", 2)[0];
+            String target = beforePipe.split("#")[0].strip();
+            if (target.isBlank()) {
+                continue;
+            }
+            span.put("target", target);
+            int hash = beforePipe.indexOf('#');
+            if (hash >= 0) {
+                String anchor = beforePipe.substring(hash + 1).strip();
+                if (!anchor.isBlank()) {
+                    span.put("anchor", anchor);
+                }
+            }
+            if (inner.indexOf('|') >= 0) {
+                String display = inner.split("\\|", 2)[1].strip();
+                if (!display.isBlank()) {
+                    span.put("display", display);
+                }
+            }
+            int line = 1;
+            for (int i = 0; i < at; i++) {
+                if (content.charAt(i) == '\n') {
+                    line++;
+                }
+            }
+            span.put("line", line);
+            span.put("offset", at);
+            spans.add(span);
+        }
+        return spans;
+    }
 
     public MarkdownProcessor() {
-        markdownLinkReader = new MarkdownLinkReader();
-        markdownWikilinkReader = new MarkdownWikilinkReader();
         yamlFrontmatterReader = new YamlFrontmatterReader();
     }
 
     public PksFile initialParse(PkmsEntry entry, byte[] bytes) {
-        String content = new String(bytes, StandardCharsets.UTF_8);
+        // BOM stripped for parsing only — Blake3 hashes the raw bytes, so the
+        // stored identity is unaffected (BUGS.md B16)
+        String content = BomStripper.strip(new String(bytes, StandardCharsets.UTF_8));
 
         Map<String, Object> frontmatter = new HashMap<>();
         try {
@@ -50,50 +177,99 @@ public class MarkdownProcessor {
         } catch (Exception e) {
             logger.error("Error computing Blake3 hash for {}", entry.relativePath(), e);
         }
+        // Body for the FTS index: the rendered plain text (v6) — over-cap
+        // bodies store as NULL (unindexed). The RAW slice stays the
+        // extraction input below: spans/outline are source-shape facts.
+        String body = extractBody(content);
+        pksFile.setBody(plainBody(body));
 
-        var wikilinks = markdownWikilinkReader.getWikilinks(content);
-        if (!wikilinks.isEmpty()) {
-            LinkedHashMap<String, Object> wikilinksMap = new LinkedHashMap<>();
-            wikilinksMap.put("wikilinks", wikilinks);
-            pksFile.getMutableProperties().putAll(wikilinksMap);
+        // One spec-grammar parse produces all extractions. Input = the body
+        // (post-frontmatter) — the frontmatter block must not leak into
+        // outline/heading shapes (it would parse as a setext heading) and
+        // matches the FTS body semantics. Over-cap notes extract from the
+        // full content (links stay indexed even when the body doesn't).
+        String extractionInput = body != null ? body : content;
+        MarkdownExtractor.Extraction extraction = extractor.extract(extractionInput);
+        putIfNotEmpty(pksFile, "links", extraction.links());
+        // v7: frontmatter wikilink-shaped values join the graph — their raw
+        // inner texts merge into the same `wikilinks` contract (display/
+        // heading-split cleaning happens downstream, same as body entries)
+        List<String> wikiTargets = new ArrayList<>(extraction.wikilinks());
+        List<Map<String, Object>> fmSpans = frontmatterLinkSpans(content);
+        for (Map<String, Object> fm : fmSpans) {
+            String target = String.valueOf(fm.get("target"));
+            if (!wikiTargets.contains(target)) {
+                wikiTargets.add(target);
+            }
         }
-        var links = markdownLinkReader.getMarkdownLinksProperties(content);
-        if (!links.isEmpty()) {
-            var linksMap = Map.of("links", links);
-            pksFile.getMutableProperties().putAll(linksMap);
-        }
-        var bases = getBases(content);
-        if (!bases.isEmpty()) {
-            var basesMap = Map.of("bases", bases);
-            pksFile.getMutableProperties().putAll(basesMap);
-        }
-        var luabases = getLuaBases(content);
-        if (!luabases.isEmpty()) {
-            var luabasesMap = Map.of("luabases", luabases);
-            pksFile.getMutableProperties().putAll(luabasesMap);
-        }
+        putIfNotEmpty(pksFile, "wikilinks", wikiTargets);
+        putIfNotEmpty(pksFile, "tasks", extraction.tasksOpen());
+        putIfNotEmpty(pksFile, "tasksDone", extraction.tasksDone());
+        putIfNotEmpty(pksFile, "bases", extraction.bases());
+        putIfNotEmpty(pksFile, "luabases", extraction.luabases());
+        putIfNotEmpty(pksFile, "outline", extraction.outline());
+        // Span facts: the extractor emits body-relative offsets/lines — the
+        // persisted property stores full-content coordinates (the provenance
+        // consumer slices the raw file, frontmatter included).
+        List<Object> allSpans = new ArrayList<>(adjustSpans(extraction.spans(), content, body));
+        allSpans.addAll(fmSpans);
+        putIfNotEmpty(pksFile, "wikilinkSpans", allSpans);
+        // linkSpans ride the same body-relative → full-content adjust (the
+        // original code stored them RAW — body-relative coordinates under a
+        // full-content contract; the pinned ServerTest fixture hid it)
+        putIfNotEmpty(pksFile, "linkSpans", adjustSpans(extraction.linkSpans(), content, body));
+        // v6 span facts ride the same body-relative → full-content adjust:
+        // TASK line/offset for editor digests, EMBED view provenance
+        putIfNotEmpty(pksFile, "taskSpans", adjustSpans(extraction.taskSpans(), content, body));
+        putIfNotEmpty(pksFile, "embedSpans", adjustSpans(extraction.embedSpans(), content, body));
 
         return pksFile;
     }
 
-    // Preferred overload for batch use (e.g. EmbedProcessor): caller provides a
-    // shared WikilinkService so the full-table-scan cache is built only once.
-    public Map parseToMap(String content, WikilinkService wikilinkService) {
-        Map <String, Object> map = new HashMap<>();
-        // parse wikilinks, change the content
-        // TODO this should be a different pattern
-        WikilinkToMarkdownLinkAction wikilinkToMarkdownLinkAction = new WikilinkToMarkdownLinkAction();
-        var wikilinks = wikilinkToMarkdownLinkAction.getWikilinks(content, wikilinkService);
-        if (!wikilinks.isEmpty()) {
-            map.put("wikilinks", wikilinks);
+    // Span facts are body-relative (the extraction parse input); persisted
+    // coordinates are full-content (frontmatter included) — provenance
+    // consumers slice the raw file. One adjuster for every span family.
+    // Package-private for the frontmatter/over-cap pin tests.
+    static List<Object> adjustSpans(List<Map<String, Object>> raws, String content, String body) {
+        if (raws == null || raws.isEmpty()) {
+            return raws == null ? null : new ArrayList<>(raws);
         }
-        content = wikilinkToMarkdownLinkAction.transformWikilinksToLinks(content, wikilinkService);
-        // parse the links
-        var links = markdownLinkReader.getMarkdownLinksProperties(content);
-        if (!links.isEmpty()) {
-            map.put("links", links);
+        if (body == null) {
+            // Extraction ran on the FULL content (over-cap body, H3): spans
+            // are already full-content coordinates — never re-shift them
+            return new ArrayList<>(raws);
         }
-        return map;
+        int bodyStart = content.length() - body.length();
+        if (bodyStart <= 0) {
+            return new ArrayList<>(raws);
+        }
+        List<Object> adjusted = new ArrayList<>();
+        for (Object spanObj : raws) {
+            if (spanObj instanceof Map<?, ?> span) {
+                Map<String, Object> copy = new LinkedHashMap<>();
+                for (Map.Entry<?, ?> spanEntry : span.entrySet()) {
+                    copy.put(String.valueOf(spanEntry.getKey()), spanEntry.getValue());
+                }
+                int offset = Integer.parseInt(String.valueOf(copy.get("offset"))) + bodyStart;
+                copy.put("offset", offset);
+                int line = 1;
+                for (int i = 0; i < Math.min(offset, content.length()); i++) {
+                    if (content.charAt(i) == '\n') {
+                        line++;
+                    }
+                }
+                copy.put("line", line);
+                adjusted.add(copy);
+            } else {
+                adjusted.add(spanObj);
+            }
+        }
+        return adjusted;
+    }
+
+    private static void putIfNotEmpty(PksFile pksFile, String key, Object values) {        if (values instanceof List<?> list && !list.isEmpty()) {
+            pksFile.getMutableProperties().put(key, list);
+        }
     }
 
     public List<String> getBases(String content) {

@@ -1,3 +1,23 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * This file is part of PKSPKMS.
+ * Copyright (C) 2026 Paul Kenny
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package io.pskenny.pkspkms.io.fs;
 
 import org.junit.jupiter.api.Test;
@@ -11,6 +31,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -33,6 +54,37 @@ public class JavaFileSystemTest {
         Files.writeString(vault.resolve("keep.md"), "content");
 
         assertEquals(List.of("keep.md"), paths());
+    }
+
+    @Test
+    void siblingVaultContentIsRejectedNotBleedThrough() throws IOException {
+        // BUGS.md 11: containment without the trailing separator let a sibling
+        // root's files pass the probe and bleed "/v2/…" into the relative path
+        Path sibling = vault.resolveSibling(vault.getFileName() + "-2");
+        try {
+            Files.createDirectories(sibling);
+            Files.writeString(sibling.resolve("sibling.md"), "content");
+
+            var fs = new JavaFileSystem(vault.toFile());
+            // `..`-relative sibling probe — must be rejected, not bleed through
+            String siblingProbe = java.nio.file.Paths.get("..", String.valueOf(vault.getFileName()) + "-2", "sibling.md").toString();
+            assertThrows(IOException.class,
+                    () -> fs.resolve(siblingProbe),
+                    "sibling content must not resolve into this vault");
+            assertTrue(fs.listFiles(List.of()).stream()
+                    .map(PkmsEntry::relativePath)
+                    .noneMatch(p -> p.contains(vault.getFileName() + "-2")),
+                    "relativePath derivation must not bleed sibling names");
+        } finally {
+            deleteQuietly(sibling);
+        }
+    }
+
+    private static void deleteQuietly(Path dir) {
+        try (var walk = Files.walk(dir)) {
+            walk.sorted(java.util.Comparator.reverseOrder()).map(Path::toFile).forEach(java.io.File::delete);
+        } catch (IOException ignored) {
+        }
     }
 
     @Test

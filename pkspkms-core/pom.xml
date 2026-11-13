@@ -8,20 +8,37 @@
     <parent>
         <groupId>io.pskenny.pkspkms</groupId>
         <artifactId>pkspkms</artifactId>
-        <version>0.1.0</version>
+        <version>0.1.2</version>
     </parent>
 
     <artifactId>pkspkms-core</artifactId>
     <packaging>jar</packaging>
 
     <name>pkspkms-core</name>
+    <licenses>
+        <license>
+            <name>GNU General Public License, version 3 or later</name>
+            <url>https://www.gnu.org/licenses/gpl-3.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
     <description>Core library for PKSPKMS – parsers, repository, query engine, and HTTP server.</description>
 
     <dependencies>
         <dependency>
-            <groupId>org.commonmark</groupId>
-            <artifactId>commonmark</artifactId>
-            <version>0.27.1</version>
+            <groupId>com.vladsch.flexmark</groupId>
+            <artifactId>flexmark</artifactId>
+            <version>0.64.8</version>
+        </dependency>
+        <dependency>
+            <groupId>com.vladsch.flexmark</groupId>
+            <artifactId>flexmark-ext-wikilink</artifactId>
+            <version>0.64.8</version>
+        </dependency>
+        <dependency>
+            <groupId>com.vladsch.flexmark</groupId>
+            <artifactId>flexmark-ext-gfm-tasklist</artifactId>
+            <version>0.64.8</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

@@ -278,7 +278,7 @@ def print_report(data: dict, vault: str) -> None:
         print(f"  {human(f['size']):>12}  {f['ext']:<8}{f['path']}")
     print()
 
-    print(f"BOM-prefixed markdown (frontmatter silently lost, see BUGS.md B36): {data['bom_markdown_count']}")
+    print(f"BOM-prefixed markdown (frontmatter silently lost): {data['bom_markdown_count']}")
 
 
 def main() -> int:

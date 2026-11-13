@@ -1,62 +1,40 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * This file is part of PKSPKMS.
+ * Copyright (C) 2026 Paul Kenny
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package io.pskenny.pkspkms.repo;
 
-import io.pskenny.pkspkms.io.PksFile;
-import io.pskenny.pkspkms.repo.query.CompiledQuery;
-import io.pskenny.pkspkms.repo.query.PropertyTypes;
-import io.pskenny.pkspkms.io.fs.PkmsFileSystem;
-
-import java.util.List;
-import java.util.Map;
-import java.util.function.Consumer;
-
-public interface PksFileRepository extends AutoCloseable {
-
-    void loadDirectoryIntoRepository();
-
-    void loadVirtualVault(PkmsFileSystem aliasFs, String alias);
-
-    /** Renders base/luabase embeds; call once after all vaults have loaded. */
-    default void processEmbeds() {}
-
-    List<PksFile> searchRegular(CompiledQuery query);
-
-    /** Property types declared in the vault's .obsidian/types.json; empty when unknown. */
-    default PropertyTypes getPropertyTypes() {
-        return PropertyTypes.empty();
-    }
-
-    default void searchRegular(CompiledQuery query, Consumer<PksFile> consumer) {
-        searchRegular(query).forEach(consumer);
-    }
+/**
+ * The vault repository composite: loading, reading, graph reads, media,
+ * registry. Role interfaces each state one capability family abstractly —
+ * there are no default-throw stubs; a repository either carries a family or
+ * doesn't implement that role.
+ */
+public interface PksFileRepository extends VaultLoader, VaultReader, VaultGraph, VaultMedia, VaultRegistry, AutoCloseable {
 
     /**
-     * All files as parsed PksFile maps, in storage order. One JSON parse per
-     * file — the corpus for single-pass embed rendering.
+     * Read-only diagnostics snapshot for the MCP {@code health} tool — never
+     * writes, never caches. Default keeps non-SQLite consumers honest.
      */
-    List<PksFile> loadCorpus();
-
-    String resolveWikilink(String wikilink);
-
-    int addVaultAlias(String alias, String directory, boolean isVirtual);
-
-    boolean vaultAliasExists(String alias);
-
-    Map<String, Object> cacheFile(String address, String location, String cacheDirectory);
-
-    /**
-     * Per-alias {@code {filePath, blake3}} pairs for pkspkms:// targets.
-     * Main-vault rows (vault_alias_id null) are excluded: /cache only serves
-     * registered aliases.
-     */
-    default Map<String, Object> manifest() {
-        return Map.of();
+    default java.util.Map<String, Object> healthSnapshot() {
+        return java.util.Map.of("status", "unknown");
     }
-
-    void createPropertyIndex(String propertyKey, String type);
-
-    String getMarkdownFromLuaBase(String luaBaseYaml);
-
-    String getMarkdownFromBase(String baseYaml);
 
     @Override
     void close();

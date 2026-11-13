@@ -5,19 +5,22 @@ This directory contains reference files for integrating `pkspkms-core` into a Ko
 ## Why this works
 
 `pkspkms-core` is pure Java with no Android-unsafe dependencies:
-- No `org.sqlite` in main source (moved to `pkspkms-desktop`; Android brings its own via xerial)
-- No `java.nio.file` (replaced with `java.io.File` — works on API < 26)
+- No `org.sqlite` in main source — Android brings its own driver via xerial's bundled Native `.so`
+- No `java.nio.file` in main source (replaced with `java.io.File` — works on API < 26)
 - No `slf4j-simple` at compile scope (test-only in core)
-- No Java records (replaced with plain final classes — no D8 dexing errors)
-- File I/O is abstracted behind `VaultFileSystem` / `VaultEntry` interfaces
-- A default `JavaFileVaultFileSystem` (wrapping `java.io.File`) is provided in core
-- All compile-scope dependencies are pure Java: `commonmark`, `jackson-databind`, `luaj-jse`, `snakeyaml`, `nanohttpd`, `commons-codec`, `slf4j-api`
+- File I/O is abstracted behind the `PkmsFileSystem` / `PkmsEntry` interfaces (`io.pskenny.pkspkms.io.fs`)
+- A default `JavaFileSystem` (wrapping `java.io.File`) is provided in core
+- Uses Java records (`CompiledQuery`, `QueryNode`, `SynthFile`, …) — fine with
+  AGP 8 toolchains; verify your desugaring setup
+- All compile-scope dependencies are pure Java: `flexmark` (+ wikilink/gfm-tasklist), `jackson-databind`, `luaj-jse`, `snakeyaml`, `nanohttpd`, `commons-codec`, `slf4j-api`
 
-The one piece that needs xerial's `sqlite-jdbc` is `SQLiteLuaConnector` — it uses `org.sqlite.Function.create()` to register `lua_eval` as a SQLite custom function via JNI. xerial bundles Android-native `.so` files (`aarch64`, `arm`, `x86`, `x86_64`) inside the JAR. The JNI call to `sqlite3_create_function` works identically on Android and desktop — **true parity, no fallback**.
+Embed filters evaluate **in-process** (`LuaBaseProcessor` + `LuaBaseInterpreter`, pure-Java luaj —
+no JNI Lua hook). You still need xerial's `sqlite-jdbc` — it is the SQLite driver itself, with
+Android `.so` files (`aarch64`, `arm`, `x86`, `x86_64`) bundled inside the JAR.
 
 ## Prerequisites
 
-- Android **API 21+** (SQLite JSON1 functions `json_extract`/`json_each` require API 21)
+- Android **API 21+** (the SQLite engine is xerial's own bundled modern build — JSON1 and FTS5 come from that engine, not from the Android platform)
 - Desugared Java 8+ library support enabled
 - Gradle with AGP 8.0+
 
@@ -25,8 +28,7 @@ The one piece that needs xerial's `sqlite-jdbc` is `SQLiteLuaConnector` — it u
 
 | File | Purpose |
 |------|---------|
-| `SQLiteLuaConnector.java` | Copy into `src/main/java/io/pskenny/pkspkms/repo/sqlite/` — registers `lua_eval` as a SQLite custom function |
-| `PkspkmsAndroid.kt` | Reference Kotlin utility object — shows driver registration, repository init, vault load, server start |
+| `PkspkmsAndroid.kt` | Reference Kotlin utility object — driver registration, repository init, vault load, server start |
 | `build.gradle.example` | Reference Gradle snippet — dependencies + native `.so` extraction task |
 
 ## Integration steps
@@ -50,7 +52,7 @@ implementation 'org.xerial:sqlite-jdbc:3.51.3.0'
 implementation 'org.slf4j:slf4j-simple:2.0.17'
 ```
 
-Core's transitive deps (`commonmark`, `jackson`, `luaj`, `snakeyaml`, `nanohttpd`, `commons-codec`) should resolve automatically via Maven. If your build excludes transitive deps, declare them explicitly (see `build.gradle.example`).
+Core's transitive deps (`flexmark` and its extensions, `jackson`, `luaj`, `snakeyaml`, `nanohttpd`, `commons-codec`) should resolve automatically via Maven. If your build excludes transitive deps, declare them explicitly (see `build.gradle.example`).
 
 ### Step 3: Extract native libraries
 
@@ -65,14 +67,10 @@ The task maps xerial's directory names to Android ABI names:
 | `x86` | `x86` |
 | `x86_64` | `x86_64` |
 
-### Step 4: Add SQLiteLuaConnector.java
+### Step 4: Construct the repository with a `null` registrar
 
-Copy `SQLiteLuaConnector.java` from this directory into your app's source tree at:
-```
-src/main/java/io/pskenny/pkspkms/repo/sqlite/SQLiteLuaConnector.java
-```
-
-No changes needed — it's the same file used by `pkspkms-desktop`.
+Core evaluates base/luabase embed filters in-process (`LuaBaseProcessor`, pure-Java luaj), so nothing
+is registered on the connection. The constructor's registrar argument takes `null`.
 
 ### Step 5: Initialize
 
@@ -87,14 +85,14 @@ val dbPath = "/data/data/${packageName}/databases/pkspkms.db"
 File(dbPath).parentFile?.mkdirs()
 
 // Construct vault filesystem
-// For path-based access (app-internal storage), use JavaFileVaultFileSystem:
-val vaultFs: VaultFileSystem = JavaFileVaultFileSystem(File(vaultPath))
-// For SAF (user-picked trees), implement VaultFileSystem yourself — see below.
+// For path-based access (app-internal storage), use JavaFileSystem:
+val vaultFs: PkmsFileSystem = JavaFileSystem(File(vaultPath))
+// For SAF (user-picked trees), implement PkmsFileSystem yourself — see below.
 
-// Construct repository with Lua function registration + vault filesystem
+// Construct repository (null registrar — embed filters run in-process)
 val repository = SQLitePksFileRepository(
     "jdbc:sqlite:$dbPath",
-    SQLiteLuaConnector.luaFunctionRegistrar(),
+    null,
     vaultFs
 )
 
@@ -110,23 +108,23 @@ server.start(60000, false)
 
 ### Step 5b: SAF (Storage Access Framework) — user-picked directory access
 
-To access user-picked trees (required for scoped storage on Android 10+), implement `VaultFileSystem` yourself using `DocumentFile` + `ContentResolver`. pkspkms-core provides only the interface; the Android app provides the implementation.
+To access user-picked trees (required for scoped storage on Android 10+), implement `PkmsFileSystem` yourself using `DocumentFile` + `ContentResolver`. pkspkms-core provides only the interface; the Android app provides the implementation.
 
 Sketch:
 ```kotlin
-class SafVaultFileSystem(
+class SafFileSystem(
     private val resolver: ContentResolver,
     private val treeUri: Uri
-) : VaultFileSystem {
+) : PkmsFileSystem {
 
-    override fun listFiles(excluded: List<String>?): List<VaultEntry> {
+    override fun listFiles(excluded: List<String>?): List<PkmsEntry> {
         val root = DocumentFile.fromTreeUri(/* context */ ctx, treeUri)!!
-        val result = mutableListOf<VaultEntry>()
+        val result = mutableListOf<PkmsEntry>()
         walkSaf(root, "", excluded ?: emptyList(), result)
         return result
     }
 
-    private fun walkSaf(dir: DocumentFile, prefix: String, excluded: List<String>, out: MutableList<VaultEntry>) {
+    private fun walkSaf(dir: DocumentFile, prefix: String, excluded: List<String>, out: MutableList<PkmsEntry>) {
         for (child in dir.listFiles()) {
             val name = child.name ?: continue
             val rel = if (prefix.isEmpty()) name else "$prefix/$name"
@@ -134,12 +132,12 @@ class SafVaultFileSystem(
                 if (name in excluded) continue
                 walkSaf(child, rel, excluded, out)
             } else if (child.isFile) {
-                out.add(SafVaultEntry(rel, name, child.lastModified()))
+                out.add(SafEntry(rel, name, child.lastModified()))
             }
         }
     }
 
-    override fun resolve(relativePath: String): VaultEntry { /* ... */ }
+    override fun resolve(relativePath: String): PkmsEntry { /* ... */ }
     override fun openInput(relativePath: String): InputStream = resolver.openInputStream(resolveUri(relativePath))!!
     override fun exists(relativePath: String): Boolean = resolveUri(relativePath) != null
     override fun openOutput(relativePath: String): OutputStream { /* create parents, open output */ }
@@ -148,11 +146,11 @@ class SafVaultFileSystem(
 
     private fun resolveUri(relativePath: String): Uri? { /* walk segments */ }
 
-    private class SafVaultEntry(
+    private class SafEntry(
         private val rel: String,
         private val name: String,
         private val mtime: Long
-    ) : VaultEntry {
+    ) : PkmsEntry {
         override fun relativePath() = rel
         override fun name() = name
         override fun lastModified() = mtime
@@ -160,14 +158,14 @@ class SafVaultFileSystem(
 }
 ```
 
-The Android app picks a tree via `ACTION_OPEN_DOCUMENT_TREE`, persists the URI permission, then constructs `SafVaultFileSystem(resolver, uri)`. Pass it to `SQLitePksFileRepository` as the `vaultFs` constructor argument.
+The Android app picks a tree via `ACTION_OPEN_DOCUMENT_TREE`, persists the URI permission, then constructs `SafFileSystem(resolver, uri)`. Pass it to `SQLitePksFileRepository` as the `vaultFs` constructor argument.
 
 ### Step 5c: Virtual vaults with SAF
 
-If your app needs multiple SAF trees (e.g. a main vault + a referenced vault), construct a `VaultFileSystem` per tree, then call:
+If your app needs multiple SAF trees (e.g. a main vault + a referenced vault), construct a `PkmsFileSystem` per tree, then call:
 
 ```kotlin
-val aliasFs = SafVaultFileSystem(resolver, secondTreeUri)
+val aliasFs = SafFileSystem(resolver, secondTreeUri)
 repository.loadVirtualVault(aliasFs, "alias_name")
 ```
 
@@ -190,69 +188,68 @@ The database is SQLite, created automatically by `SQLitePksFileRepository`'s con
 
 | Table | Columns | Purpose |
 |---|---|---|
-| `FILES` | `id`, `vault_alias_id`, `file_path`, `file_name`, `file_name_ext`, `file_created`, `file_last_modified`, `last_sync`, `properties` (JSON), `frontmatter` (JSON), `blake3` | One row per file. `properties` is the primary query target — a JSON blob of frontmatter + extracted links/wikilinks/embeds |
+| `FILES` | `id`, `vault_alias_id`, `file_path`, `file_name`, `file_name_ext`, `file_last_modified`, `properties` (JSON), `blake3`, `body` (note text, `''` for binaries) | One row per file. `properties` is the primary query target — a JSON blob of frontmatter + extracted links/wikilinks/embeds; `body` feeds the FTS5 `files_fts` full-text index (`text:` queries; ranked with `textSnippet`) |
 | `LINKS` | `source_file_id`, `target_file_id`, `link_type` | Graph edges between files. `link_type` is `outgoing`, `wikilink`, etc. Backlinks are computed from this table |
-| `EMBEDS` | `id`, `vault_alias_id`, `file_id`, `type`, `original_match`, `target_file`, `target_header`, `generated_content`, `computed_props` | Embed records (`base`/`luabase`/`embed`). `generated_content` holds rendered Markdown |
+| `EMBEDS` | `id`, `file_id`, `type`, `original_match`, `target_file`, `target_header`, `generated_content` | Embed records (`base`/`luabase`). `generated_content` holds rendered Markdown; the trimmed `original_match` block is the cache key |
 | `VAULT_ALIASES` | `id`, `alias`, `directory`, `is_virtual`, `created_at` | Virtual vault mappings (`@alias/` prefixes in file paths) |
 
-### Critical: singleton lifecycle
+### Lifecycle
 
-`SQLiteSchema.init()` currently **drops and recreates** all four tables on every `new SQLitePksFileRepository(...)` construction. This means:
-
-- **Do NOT** construct the repository inside an `Activity` or `ViewModel` — it will wipe the database on every launch/rotation
-- **DO** keep the repository as an app-lifetime singleton (e.g., in `Application.onCreate()` or a DI container)
-
-This schema-drop is a known issue planned for a future fix (`CREATE TABLE IF NOT EXISTS` + migration). Until then, singleton is mandatory.
+`SQLiteSchema` is versioned (`META.schema_version`) and persists data across
+constructions (versioned schema — see `SQLiteSchema`). Still keep the repository as an
+app-lifetime singleton — recreating it re-walks and re-parses the vault for
+nothing.
 
 ### Multiple connections
 
-`EmbedProcessor` and `WikilinkService` each open their own JDBC connections via `DriverManager.getConnection(dbUrl)` in addition to the repository's primary connection. WAL mode (set by the constructor's `PRAGMA journal_mode = WAL`) makes concurrent reads safe. This is normal — three connections to the same SQLite file.
+`SqliteEmbedProcessor` (the base/luabase render pass) opens its own JDBC connection via `DriverManager.getConnection(dbUrl)` in addition to the repository's primary connection (wikilink resolution rides the repository's shared connection through `SqliteFiles`). WAL mode (set by the constructor's `PRAGMA journal_mode = WAL`) makes concurrent reads safe. This is normal — two connections to the same SQLite file.
 
-## Query DSL
+## Query API
 
-`PksFileRepository.searchRegular(String)` takes a **DSL string**, not SQL. `SqlQueryParser` translates it to SQLite SQL internally:
+The repository's query interface takes a **compiled query**, built from a
+Lucene-style property-query string — not SQL:
 
-```
-# Equality
-tags = 'foo'
-filePath = 'notes/Markdown.md'
+```kotlin
+import io.pskenny.pkspkms.repo.query.CompiledQuery
+import io.pskenny.pkspkms.repo.query.QueryParser
+import io.pskenny.pkspkms.repo.query.QueryCompiler
 
-# Wildcard (becomes LIKE)
-filePath = *.md         →  filePath LIKE '%.md'
-filePath : notes/*      →  filePath LIKE 'notes/%'
-
-# Boolean operators
-tags = 'foo' AND NOT type = 'bar'
-(tags = 'a' OR tags = 'b') AND type = 'note'
-
-# Key existence (has the property)
-tags                    →  json_type(properties, '$.tags') IS NOT NULL
+val compiled: CompiledQuery = QueryCompiler().compile(QueryParser().parse("tags:foo"))
+val results = repository.searchRegular(compiled)   // List<PksFile>
 ```
 
-Operators: `=`, `!=`, `>`, `<`, `>=`, `<=`, `LIKE`, `:` (LIKE shorthand)
+```text
+tags:foo                 property equals (scalar or any array element)
+filePath:*.md            wildcards * and ?
+tags:*                   property exists
+price:[1 TO 5]           range ({1 TO 5} exclusive, * = open bound)
+status:(todo OR done)    grouped values over one field
+"multi word"             quoted phrase
+foo bar                  bare words substring-match any property value
+NOT tags:archive         exclusion (field-absent rows match too)
+```
 
-Supports `AND` / `OR` / `NOT` and parentheses for grouping.
+Malformed input throws `QueryParseException` (offset + message). Declared
+property types from `.obsidian/types.json` drive typed comparisons on
+Android too — the vault filesystem you mount just needs to serve
+`.obsidian/types.json` at its root like any vault.
 
-Query values with special characters (spaces, parens) must be quoted: `filePath:"notes/My (Special) File.md"`
+## How embed filter evaluation works on Android
 
-## How lua_eval works on Android
-
-On both desktop and Android:
-
-1. `SQLitePksFileRepository` constructor calls `SQLiteLuaConnector.luaFunctionRegistrar().accept(conn)`
-2. `SQLiteLuaConnector.registerLuaFunction(conn)` calls `org.sqlite.Function.create(conn, "lua_eval", ...)` — a xerial JNI binding to SQLite's C `sqlite3_create_function`
-3. `searchWithLuaFilter(luaScript)` runs `SELECT ... WHERE lua_eval(?, properties) = 1` — the `lua_eval` SQL function is evaluated inside SQLite on each row
-4. Inside `lua_eval`, the Lua expression is evaluated against the row's `properties` JSON using `LuaBaseInterpreter` (pure Java luaj — Android-safe)
-
-The `.so` native libraries from xerial's JAR (extracted into `jniLibs/` by the Gradle task) provide the JNI bridge. No extra work needed — same code path as desktop.
+Core evaluates base/luabase embed filters **in-process per file**:
+`LuaBaseProcessor` hands the block's filter script to `LuaBaseInterpreter`
+(pure-Java luaj — Android-safe), and caches rendered Markdown in
+`EMBEDS.generated_content`. The SQLite engine ships inside xerial's driver
+(`jniLibs/` `.so` files), so there is no SQLite-side Lua function and no
+per-row JNI bridge to manage. Passing `null` as the repo constructor's
+registrar matches desktop.
 
 ## Troubleshooting
 
 | Error | Cause | Fix |
 |---|---|---|
 | `No suitable driver found for jdbc:sqlite:...` | JDBC driver not registered | Add `Class.forName("org.sqlite.JDBC")` before `DriverManager.getConnection` |
-| `No such function: lua_eval` | `SQLiteLuaConnector` not passed to constructor | Pass `SQLiteLuaConnector.luaFunctionRegistrar()` as the second constructor arg |
 | `UnsatisfiedLinkError: ... libsqlitejdbc...` | Native `.so` files not in `jniLibs/` | Run the `extractSqliteNatives` Gradle task, or verify `jniLibs/` contains the ABI directories |
-| `SQLITE_ERROR: no such function: json_extract` | API < 21 (no JSON1) | Confirm `minSdkVersion 21` or higher |
-| Database wiped on app restart | Repository constructed multiple times | Keep the repository as an app singleton — see "Critical: singleton lifecycle" above |
-| Slow first load | Parsing all files, expected | Subsequent loads are incremental (only changed files re-parsed) |
+| `SQLITE_ERROR: no such function: json_extract` | Bundled engine build missing | Verify `jniLibs/` libs match the pinned xerial version and the driver loads from the `.so` |
+| Index upgrade fails (`Unsupported legacy database schema`) | The database predates in-place migration and its layout is unrecognized | Rename or delete the database file and re-index (the vault is untouched — the DB is a rebuildable cache) |
+| Slow first load | Parsing all files, expected | Unchanged files are skipped on later start-ups (mtime diff) |

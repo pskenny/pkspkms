@@ -1,3 +1,23 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * This file is part of PKSPKMS.
+ * Copyright (C) 2026 Paul Kenny
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package io.pskenny.pkspkms.repo.sqlite;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -12,6 +32,14 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * Legacy SQL-side Lua evaluator: registers the `lua_eval` SQLite function.
+ * Tier 4 collapse: no runtime path composes SQL with it anymore — embed
+ * rendering evaluates filters in-process through `LuaBaseProcessor` and the
+ * Application passes a null registrar. Kept for future ad-hoc SQL Lua queries
+ * and for the desktop JNI-robustness test pins (`SQLiteLuaConnectorTest`); the
+ * Android reference in `docs/android/` documents the registration contract.
+ */
 public class SQLiteLuaConnector {
 
     private static final Logger logger = LoggerFactory.getLogger(SQLiteLuaConnector.class);
@@ -34,8 +62,10 @@ public class SQLiteLuaConnector {
                 }
             });
 
-    // Expose cache for direct unit-testing of correctness and eviction
-    public static Map<Long, Map<String, Object>> getCache() {
+    // Expose cache for direct unit-testing of correctness and eviction.
+    // Package-private: the test lives in the same package — the main API does
+    // not publish a test-only accessor (BUGS.md P3).
+    static Map<Long, Map<String, Object>> getCache() {
         return JSON_CACHE;
     }
 

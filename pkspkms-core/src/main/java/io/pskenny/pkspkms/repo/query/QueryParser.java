@@ -1,3 +1,23 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * This file is part of PKSPKMS.
+ * Copyright (C) 2026 Paul Kenny
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package io.pskenny.pkspkms.repo.query;
 
 import java.util.ArrayList;
@@ -15,7 +35,14 @@ public final class QueryParser {
     /** Default "field" for bare terms: matches any property value. */
     public static final String ALL_FIELD = "_all";
 
-    /** Fresh lexer context per parse — safe to share one instance. */
+    // Sub-query depth limit: recursion via '(' is unbounded and would
+    // overflow the JVM stack on hostile nesting (BUGS.md D2). Cap maps to
+    // the QueryParseException path → HTTP 400 / MCP tool error.
+    private static final int MAX_NESTING_DEPTH = 128;
+
+    /**
+     * Fresh lexer context per parse — safe to share one instance.
+     */
     public Query parse(String input) {
         return new Ctx(input == null ? "" : input).parse();
     }
@@ -36,12 +63,15 @@ public final class QueryParser {
         }
 
         Query parse() {
-            return new Query(parseClauses(null));
+            return new Query(parseClauses(null, 0));
         }
 
     // --- clause list ---
 
-    private List<Query.Clause> parseClauses(T terminator) {
+    private List<Query.Clause> parseClauses(T terminator, int depth) {
+        if (depth > MAX_NESTING_DEPTH) {
+            throw new QueryParseException(0, "query nesting exceeds " + MAX_NESTING_DEPTH + " levels");
+        }
         List<Query.Clause> clauses = new ArrayList<>();
         Query.Occur pending = Query.Occur.SHOULD;
         boolean expectingClause = false;
@@ -72,7 +102,7 @@ public final class QueryParser {
                 case OR -> { consume(); pending = Query.Occur.SHOULD; expectingClause = true; continue; }
                 default -> { }
             }
-            clauses.add(new Query.Clause(pending, parseClauseBody()));
+            clauses.add(new Query.Clause(pending, parseClauseBody(depth)));
             pending = Query.Occur.SHOULD;
             expectingClause = false;
         }
@@ -89,7 +119,7 @@ public final class QueryParser {
         }
     }
 
-    private QueryNode parseClauseBody() {
+    private QueryNode parseClauseBody(int depth) {
         Token t = peek();
         return switch (t.type()) {
             case WORD -> {
@@ -108,7 +138,8 @@ public final class QueryParser {
             }
             case LPAREN -> {
                 consume();
-                yield new QueryNode.Bool(parseClauses(T.RPAREN));
+                yield new QueryNode.Bool(parseClauses(T.RPAREN, depth + 1));
+
             }
             case COLON -> throw error(t, "Expected a field before ':'");
             case LBRACKET, LBRACE -> throw error(t, "Range filters need a field, e.g. price:[1 TO 5]");
@@ -150,6 +181,10 @@ public final class QueryParser {
     }
 
     private QueryNode parseFieldWord(String field, String word) {
+        if (field.equals("text") && word.contains("*") && !word.endsWith("*")) {
+            throw new QueryParseException(pos,
+                    "text: wildcards must be a suffix (e.g. rust*)");
+        }
         if (word.equals("*")) {
             return new QueryNode.FieldExists(field);
         }
@@ -201,6 +236,10 @@ public final class QueryParser {
     }
 
     private QueryNode parseRange(String field, Token open) {
+        if (field.equals("text")) {
+            throw new QueryParseException(open.offset(),
+                    "text: does not support ranges (use a term, a quoted phrase, or a suffix wildcard)");
+        }
         boolean loIncl = open.type() == T.LBRACKET;
         consume();
         String lo = parseBound();

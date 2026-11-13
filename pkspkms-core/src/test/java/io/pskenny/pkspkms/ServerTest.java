@@ -1,3 +1,23 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * This file is part of PKSPKMS.
+ * Copyright (C) 2026 Paul Kenny
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package io.pskenny.pkspkms;
 
 import fi.iki.elonen.NanoHTTPD;
@@ -23,6 +43,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -45,15 +66,22 @@ public class ServerTest {
     private static final Path TEST_DIR = Paths.get("target", "test-notes", ServerTest.class.getSimpleName());
     private static Server app;
 
+    private static final Path TEST_DB = Path.of("pkspkms.db");
+
     @BeforeEach
     void setup() throws IOException {
+        // Index persists across constructions now — start each test from a
+        // fresh DB for isolation (several tests mount vault aliases)
+        Files.deleteIfExists(TEST_DB);
+        Files.deleteIfExists(Path.of("pkspkms.db-wal"));
+        Files.deleteIfExists(Path.of("pkspkms.db-shm"));
         if (!Files.exists(TEST_DIR)) {
             Files.createDirectories(TEST_DIR);
         }
     }
 
     @AfterEach
-    void tearDown() {
+    void tearDown() throws IOException {
         if (Files.exists(TEST_DIR)) {
             try (Stream<Path> pathStream = Files.walk(TEST_DIR)) {
                 pathStream
@@ -82,17 +110,24 @@ public class ServerTest {
         if (app.wasStarted()) {
             app.stop();
         }
+        Files.deleteIfExists(TEST_DB);
+        Files.deleteIfExists(Path.of("pkspkms.db-wal"));
+        Files.deleteIfExists(Path.of("pkspkms.db-shm"));
     }
 
     void startServer() throws IOException {
-        startServer(null);
+        startServer(null, java.util.Set.of());
     }
 
     void startServer(String token) throws IOException {
+        startServer(token, java.util.Set.of());
+    }
+
+    void startServer(String token, java.util.Set<String> corsOrigins) throws IOException {
         String dir = TEST_DIR.toAbsolutePath().toString();
         PkmsFileSystem fs = new JavaFileSystem(new File(dir));
         SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + new File("pkspkms.db").getAbsolutePath(), null, fs);
-        app = new Server("127.0.0.1", TEST_PORT, token, repository);
+        app = new Server("127.0.0.1", TEST_PORT, token, corsOrigins, repository);
         app.loadRepo();
         app.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
     }
@@ -106,6 +141,155 @@ public class ServerTest {
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
         assertEquals(404, response.statusCode(), "the /files/list duplicate must be gone");
+    }
+
+    // --- CORS allow-list (extension/remote-origin consumption) ---
+
+    private static final String EXT_ORIGIN = "moz-extension://abc-123";
+    private static final String OTHER_ORIGIN = "moz-extension://other-999";
+
+    private boolean hasHeader(HttpResponse<String> response, String name) {
+        return response.headers().firstValue(name).isPresent();
+    }
+
+    private String header(HttpResponse<String> response, String name) {
+        return response.headers().firstValue(name).orElse("");
+    }
+
+    @Test
+    @DisplayName("CORS default off: no headers anywhere (B3-posture unchanged without the flag)")
+    void noCorsHeadersByDefault() throws IOException, InterruptedException {
+        startServer();
+        HttpClient client = HttpClient.newHttpClient();
+        HttpResponse<String> get = client.send(HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/files/list"))
+                .header("Origin", EXT_ORIGIN)
+                .GET().build(), HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> preflight = client.send(HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/files/list"))
+                .header("Origin", EXT_ORIGIN)
+                .header("Access-Control-Request-Method", "GET")
+                .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
+                .build(), HttpResponse.BodyHandlers.ofString());
+
+        assertFalse(hasHeader(get, "Access-Control-Allow-Origin"), "no ACAO without the flag");
+        assertFalse(hasHeader(preflight, "Access-Control-Allow-Origin"), "no preflight ACAO without the flag");
+    }
+
+    @Test
+    @DisplayName("Preflight carries CORS for a registered origin — before the auth gate (CORS spec)")
+    void preflightCarriesCorsForAllowedOrigin() throws IOException, InterruptedException {
+        startServer("test-token-123", java.util.Set.of(EXT_ORIGIN));
+        HttpClient client = HttpClient.newHttpClient();
+        HttpResponse<String> response = client.send(HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/files/list"))
+                .header("Origin", EXT_ORIGIN)
+                .header("Access-Control-Request-Method", "GET")
+                .header("Access-Control-Request-Headers", "Authorization")
+                .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
+                .build(), HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), "preflight never demands the bearer token");
+        assertEquals(EXT_ORIGIN, header(response, "Access-Control-Allow-Origin"), "origin reflected");
+        assertTrue(header(response, "Access-Control-Allow-Headers").contains("Authorization"),
+                "preflight declares the auth header");
+        assertTrue(header(response, "Access-Control-Allow-Methods").contains("GET"),
+                "preflight declares GET");
+        assertFalse(header(response, "Access-Control-Max-Age").isEmpty(), "preflight cacheable");
+    }
+
+    @Test
+    @DisplayName("Register-only origin: a different origin gets no CORS grant")
+    void disallowedOriginGetsNoCors() throws IOException, InterruptedException {
+        startServer("test-token-123", java.util.Set.of(EXT_ORIGIN));
+        HttpClient client = HttpClient.newHttpClient();
+        HttpResponse<String> response = client.send(HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/files/list"))
+                .header("Origin", OTHER_ORIGIN)
+                .header("Access-Control-Request-Method", "GET")
+                .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
+                .build(), HttpResponse.BodyHandlers.ofString());
+
+        assertFalse(hasHeader(response, "Access-Control-Allow-Origin"), "unregistered origin blocked");
+    }
+
+    @Test
+    @DisplayName("Allowed origin reflected on the actual response too")
+    void allowedOriginReflectedOnActualRequest() throws IOException, InterruptedException {
+        startServer(null, java.util.Set.of(EXT_ORIGIN));
+        HttpClient client = HttpClient.newHttpClient();
+        HttpResponse<String> response = client.send(HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/files/list"))
+                .header("Origin", EXT_ORIGIN)
+                .GET().build(), HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode());
+        assertEquals(EXT_ORIGIN, header(response, "Access-Control-Allow-Origin"));
+        assertTrue(header(response, "Vary").contains("Origin"), "reflection requires Vary: Origin");
+    }
+
+    @Test
+    @DisplayName("Auth gate survives CORS: 401 keeps CORS headers, data still token-gated")
+    void authGateSurvivesCors() throws IOException, InterruptedException {
+        startServer("test-token-123", java.util.Set.of(EXT_ORIGIN));
+        HttpClient client = HttpClient.newHttpClient();
+        HttpResponse<String> rejected = client.send(HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/files/list"))
+                .header("Origin", EXT_ORIGIN)
+                .GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertEquals(401, rejected.statusCode(), "cross-origin does not bypass auth");
+        assertEquals(EXT_ORIGIN, header(rejected, "Access-Control-Allow-Origin"),
+                "the browser must be able to read the rejection");
+
+        HttpResponse<String> allowed = client.send(HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/files/list"))
+                .header("Origin", EXT_ORIGIN)
+                .header("Authorization", "Bearer test-token-123")
+                .GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, allowed.statusCode());
+        assertEquals(EXT_ORIGIN, header(allowed, "Access-Control-Allow-Origin"));
+    }
+
+    @Test
+    @DisplayName("Wildcard mode emits * without Vary")
+    void starModeEmitsWildcard() throws IOException, InterruptedException {
+        startServer(null, java.util.Set.of("*"));
+        HttpClient client = HttpClient.newHttpClient();
+        HttpResponse<String> response = client.send(HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/files/list"))
+                .header("Origin", EXT_ORIGIN)
+                .GET().build(), HttpResponse.BodyHandlers.ofString());
+
+        assertEquals("*", header(response, "Access-Control-Allow-Origin"));
+        assertFalse(header(response, "Vary").contains("Origin"), "wildcard reflection needs no Vary");
+    }
+
+    @Test
+    @DisplayName("MCP route carries CORS too")
+    void mcpRouteCarriesCors() throws IOException, InterruptedException {
+        startServer("test-token-123", java.util.Set.of(EXT_ORIGIN));
+        HttpClient client = HttpClient.newHttpClient();
+        HttpResponse<String> response = client.send(HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/mcp"))
+                .header("Origin", EXT_ORIGIN)
+                .header("Access-Control-Request-Method", "POST")
+                .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
+                .build(), HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode());
+        assertEquals(EXT_ORIGIN, header(response, "Access-Control-Allow-Origin"));
+    }
+
+    @Test
+    @DisplayName("No Origin header → CORS inert even with the flag set")
+    void noOriginHeaderStaysInert() throws IOException, InterruptedException {
+        startServer(null, java.util.Set.of(EXT_ORIGIN));
+        HttpClient client = HttpClient.newHttpClient();
+        HttpResponse<String> response = client.send(HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/files/list"))
+                .GET().build(), HttpResponse.BodyHandlers.ofString());
+
+        assertFalse(hasHeader(response, "Access-Control-Allow-Origin"), "same-origin webui unaffected");
     }
 
     @Test
@@ -165,6 +349,11 @@ public class ServerTest {
                         """
         );
         createFile(TEST_DIR, "test2.md", Map.of("tags", "test"));
+        // `modified` rides the properties JSON — stamp a deterministic mtime
+        // so the pinned response can carry a literal ISO instant
+        FileTime fixed = FileTime.fromMillis(1735689600000L);
+        Files.setLastModifiedTime(TEST_DIR.resolve("test.md"), fixed);
+        Files.setLastModifiedTime(TEST_DIR.resolve("test2.md"), fixed);
 
         startServer();
         HttpClient client = HttpClient.newHttpClient();
@@ -187,6 +376,9 @@ public class ServerTest {
                         """
         );
         createFile(TEST_DIR, "test2.md", Map.of());
+        FileTime fixed = FileTime.fromMillis(1735689600000L);
+        Files.setLastModifiedTime(TEST_DIR.resolve("test1.md"), fixed);
+        Files.setLastModifiedTime(TEST_DIR.resolve("test2.md"), fixed);
 
         startServer();
         HttpClient client = HttpClient.newHttpClient();
@@ -438,6 +630,8 @@ No links
         assertTrue(manifest.has("gwern"), "Manifest should group by alias");
         assertTrue(manifest.has("zeta"), "Manifest should group by alias");
         assertFalse(manifest.has("main"), "Main-vault rows (no alias) must be excluded");
+        // D3 runtime probe: main-vault rows must not leak under an empty/null key group
+        assertFalse(manifest.has(""), "no empty-key group (main-vault exclusion is absolute)");
 
         JsonNode gwernFiles = manifest.get("gwern");
         assertEquals(1, gwernFiles.size());
@@ -496,6 +690,108 @@ No links
                 "CORS must be gone — browsers only ever need same-origin here");
         assertFalse(response.headers().firstValue("Access-Control-Allow-Methods").isPresent(),
                 "No method advertising (POST is rejected anyway)");
+    }
+
+    @Test
+    @DisplayName("POST /mcp requires the bearer token like every other route")
+    void mcpRequiresToken() throws IOException, InterruptedException {
+        startServer("test-token-123");
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/mcp"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(
+                        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\"}}"))
+                .build();
+        assertEquals(401, client.send(request, HttpResponse.BodyHandlers.ofString()).statusCode(),
+                "/mcp must sit behind bearer auth");
+    }
+
+    @Test
+    @DisplayName("POST /mcp initialize negotiates the protocol version")
+    void mcpInitialize() throws IOException, InterruptedException {
+        startServer("test-token-123");
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/mcp"))
+                .header("Authorization", "Bearer test-token-123")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(
+                        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"t\",\"version\":\"1\"}}}"))
+                .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), "JSON-RPC requests answer 200 with a JSON body");
+        assertTrue(response.headers().firstValue("Content-Type").orElse("").contains("application/json"));
+        JsonNode body = new ObjectMapper().readTree(response.body());
+        assertEquals("2025-06-18", body.get("result").get("protocolVersion").asText());
+        assertTrue(body.get("result").get("capabilities").has("tools"));
+    }
+
+    @Test
+    @DisplayName("POST /mcp notification answers 202 Accepted with no body")
+    void mcpNotificationAccepted() throws IOException, InterruptedException {
+        startServer("test-token-123");
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/mcp"))
+                .header("Authorization", "Bearer test-token-123")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}"))
+                .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        assertEquals(202, response.statusCode(), "notifications answer 202");
+        assertTrue(response.body().isEmpty(), "notification responses carry no body");
+    }
+
+    @Test
+    @DisplayName("GET /mcp is 405 — no standalone SSE stream (stateless server)")
+    void mcpGetRejected() throws IOException, InterruptedException {
+        startServer("test-token-123");
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/mcp"))
+                .header("Authorization", "Bearer test-token-123")
+                .GET()
+                .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        assertEquals(405, response.statusCode(), "GET /mcp must be 405 without SSE support");
+        assertEquals("POST", response.headers().firstValue("Allow").orElse(""),
+                "405 must advertise POST");
+    }
+
+    @Test
+    @DisplayName("POST /mcp tools/call serves vault content over HTTP")
+    void mcpToolsCallOverHttp() throws IOException, InterruptedException {
+        createFile(TEST_DIR, "mcp-note.md", Map.of("tags", "mcp-test"), "mcp body content");
+        startServer("test-token-123");
+        HttpClient client = HttpClient.newHttpClient();
+
+        HttpResponse<String> read = client.send(HttpRequest.newBuilder()
+                        .uri(URI.create(BASE_URL + "/mcp"))
+                        .header("Authorization", "Bearer test-token-123")
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString("""
+                                {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"read_file","arguments":{"path":"../pkspkms.db"}}}
+                                """))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+        JsonNode rejected = new ObjectMapper().readTree(read.body());
+        assertTrue(rejected.get("result").get("isError").asBoolean(),
+                "path traversal must be rejected at the HTTP layer too");
+
+        HttpResponse<String> found = client.send(HttpRequest.newBuilder()
+                        .uri(URI.create(BASE_URL + "/mcp"))
+                        .header("Authorization", "Bearer test-token-123")
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(
+                                "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{\"name\":\"read_file\",\"arguments\":{\"path\":\"mcp-note.md\"}}}"))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+        JsonNode body = new ObjectMapper().readTree(found.body());
+        assertFalse(body.get("result").get("isError").asBoolean());
+        assertTrue(body.get("result").get("content").get(0).get("text").asText().contains("mcp body content"),
+                "read_file must return the note's raw markdown");
     }
 
     @Disabled("Depth-2 graph traversal not yet implemented")

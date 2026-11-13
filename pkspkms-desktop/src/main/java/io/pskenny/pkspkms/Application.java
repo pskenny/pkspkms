@@ -1,5 +1,27 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * This file is part of PKSPKMS.
+ * Copyright (C) 2026 Paul Kenny
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package io.pskenny.pkspkms;
 
+import fi.iki.elonen.NanoHTTPD;
+import io.pskenny.pkspkms.desktop.BrokenPipeLogFilter;
 import io.pskenny.pkspkms.desktop.LogCapture;
 import io.pskenny.pkspkms.desktop.TrayFactory;
 import io.pskenny.pkspkms.desktop.TrayManager;
@@ -8,7 +30,6 @@ import io.pskenny.pkspkms.io.feed.FeedFetcher;
 import io.pskenny.pkspkms.io.fs.JavaFileSystem;
 import io.pskenny.pkspkms.io.fs.PkmsFileSystem;
 import io.pskenny.pkspkms.repo.sqlite.SQLitePksFileRepository;
-import io.pskenny.pkspkms.repo.sqlite.SQLiteLuaConnector;
 import net.sourceforge.argparse4j.ArgumentParsers;
 import net.sourceforge.argparse4j.impl.Arguments;
 import net.sourceforge.argparse4j.inf.ArgumentParser;
@@ -33,21 +54,35 @@ public final class Application {
     private final Logger logger = LoggerFactory.getLogger(Application.class);
 
     public static void main(String[] args) {
+        System.exit(run(args));
+    }
+
+    // Exit-code surface for tests: no args / unknown command / bad query return
+    // 1 with a clean log line instead of a stack trace (BUGS.md B18). Do not
+    // call with a functional `server` argument list — the server branch blocks.
+    static int run(String[] args) {
         try {
             new Application(args);
+            return 0;
         } catch (IllegalArgumentException | io.pskenny.pkspkms.repo.query.QueryParseException e) {
-            LoggerFactory.getLogger(Application.class).error("Bad query: {}", e.getMessage());
-            System.exit(1);
+            LoggerFactory.getLogger(Application.class).error("Bad arguments: {}", e.getMessage());
+            return 1;
+        } catch (io.pskenny.pkspkms.repo.RepositoryException e) {
+            LoggerFactory.getLogger(Application.class).error("Startup failed: {}", io.pskenny.pkspkms.io.LogUtil.oneLine(e.getMessage()));
+            return 1;
         } catch (IOException e) {
-            LoggerFactory.getLogger(Application.class).error("Runtime error, could start PKSPKMS: {}",
-                    e.getMessage(), e);
-            System.exit(1);
+            LoggerFactory.getLogger(Application.class).error("Runtime error, could not start PKSPKMS: {}",
+                    io.pskenny.pkspkms.io.LogUtil.oneLine(e.getMessage()), e);
+            return 1;
         }
     }
 
     public Application(String[] args) throws IOException {
         Namespace ns = parseArguments(args);
         String command = ns.getString("command");
+        if (command == null) {
+            throw new IllegalArgumentException("No command given — try 'server' or 'export'. Run with --help for usage.");
+        }
         switch(command) {
             // start server
             case "server":
@@ -56,9 +91,33 @@ public final class Application {
                 String dbPath = ns.getString("db");
                 String bind = ns.getString("bind");
                 boolean tray = ns.getBoolean("tray");
+                boolean resetDb = ns.getBoolean("reset_db");
 
-                String apiToken = resolveToken(ns.getString("token"), ns.getString("token_file"));
-                logger.info("API token written to {}", ns.getString("token_file"));
+                // Bearer auth is opt-in (Option A): --enable-auth is the sole
+                // switch; --token without it is a usage error, never silently
+                // ignored (that server must not pretend it is protected).
+                boolean enableAuth = Boolean.TRUE.equals(ns.getBoolean("enable_auth"));
+                if (ns.getString("token") != null && !enableAuth) {
+                    throw new IllegalArgumentException("--token requires --enable-auth (auth is opt-in)");
+                }
+
+                // CORS allow-list: default closed. Wildcard without auth =
+                // every web page reads the vault — rejected at parse time.
+                java.util.List<String> corsList = ns.get("cors_origin");
+                boolean corsWildcard = corsList != null && corsList.contains("*");
+                if (corsWildcard && !enableAuth) {
+                    throw new IllegalArgumentException("--cors-origin * requires --enable-auth (any web page would read the vault)");
+                }
+                java.util.Set<String> corsOrigins = (corsList == null)
+                        ? java.util.Set.of()
+                        : java.util.Set.copyOf(corsList);
+
+                String apiToken = resolveApiToken(enableAuth, ns.getString("token"), ns.getString("token_file"));
+                if (enableAuth) {
+                    logger.info("API token written to {}", ns.getString("token_file"));
+                } else {
+                    logger.info("Auth disabled — bearer token not required (loopback-only server)");
+                }
 
                 TrayManager trayManager = null;
                 LogCapture logCapture = null;
@@ -85,13 +144,17 @@ public final class Application {
                     }
                 }
 
-                //  Load main directory
+                //  Load main directory. Registrar = null: the legacy `lua_eval`
+                // SQL function has no runtime caller (Tier 4 collapse) — embed
+                // filters evaluate in-process through LuaBaseProcessor.
                 PkmsFileSystem vaultFs = new JavaFileSystem(new File(directory));
                 SQLitePksFileRepository repository = new SQLitePksFileRepository(
                         "jdbc:sqlite:" + dbPath,
-                        SQLiteLuaConnector.luaFunctionRegistrar(),
-                        vaultFs);
-                Server server = new Server(bind, port, apiToken, repository);
+                        null,
+                        vaultFs,
+                        resetDb);
+                Server server = new Server(bind, port, apiToken, corsOrigins, repository);
+                BrokenPipeLogFilter.install();
                 server.loadRepo();
 
                 // Load virtual friends — per-mount try/catch: one broken vault
@@ -110,11 +173,11 @@ public final class Application {
                             if (!Files.exists(vDirPath) || !Files.isDirectory(vDirPath)) {
                                 throw new IllegalArgumentException("Directory does not exist: " + path);
                             }
-                            logger.info("Loading virtual vault: @{} -> {}", alias, path);
+                            logger.info("Loading virtual vault: @{} -> {}", alias, io.pskenny.pkspkms.io.LogUtil.oneLine(path));
                             PkmsFileSystem aliasFs = new JavaFileSystem(new File(path));
                             server.loadVirtualVault(aliasFs, alias);
                         } catch (IllegalArgumentException | io.pskenny.pkspkms.repo.RepositoryException e) {
-                            logger.error("Failed to mount vault '{}', skipping: {}", spec, e.getMessage());
+                            logger.error("Failed to mount vault '{}', skipping: {}", io.pskenny.pkspkms.io.LogUtil.oneLine(spec), e.getMessage());
                         }
                     }
                 }
@@ -131,7 +194,10 @@ public final class Application {
                 // Embeds render once, over the full corpus of every mounted vault
                 server.processEmbeds();
 
-                server.start();
+                // Socket read timeout: matches the ServerTest-tested path and
+                // keeps slowloris-style clients from stalling request threads
+                // (BUGS.md B23)
+                server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
                 logger.info("Server started on http://localhost:{}", port);
 
                 if (trayManager != null) {
@@ -160,18 +226,19 @@ public final class Application {
                 break;
             // export command
             case "export":
+                Export.ExportMode mode = Export.ExportMode.valueOf(ns.getString("type").toUpperCase());
                 Export.ExportConfig exportConfig = new Export.ExportConfig(
                         ns.getString("directory"),
                         ns.getString("db"),
                         ns.getString("query"),
                         ns.getString("output"),
-                        ns.getString("type"),
+                        mode,
                         ns.getBoolean("dryrun")
                     );
 
                 PkmsFileSystem exportInputFs = new JavaFileSystem(new File(exportConfig.directory()));
                 PkmsFileSystem exportOutputFs = new JavaFileSystem(new File(exportConfig.output()));
-                SQLitePksFileRepository exportRepo = new SQLitePksFileRepository("jdbc:sqlite:" + exportConfig.dbPath(), SQLiteLuaConnector.luaFunctionRegistrar(), exportInputFs);
+                SQLitePksFileRepository exportRepo = new SQLitePksFileRepository("jdbc:sqlite:" + exportConfig.dbPath(), null, exportInputFs, ns.getBoolean("reset_db"));
                 exportRepo.loadDirectoryIntoRepository();
 
                 new Export(exportConfig, exportRepo, exportInputFs, exportOutputFs).export();
@@ -194,7 +261,7 @@ public final class Application {
                     }
 
                     PkmsFileSystem addVaultFs = new JavaFileSystem(new File(addDirectory));
-                    SQLitePksFileRepository addRepo = new SQLitePksFileRepository("jdbc:sqlite:" + addDbPath, SQLiteLuaConnector.luaFunctionRegistrar(), addVaultFs);
+                    SQLitePksFileRepository addRepo = new SQLitePksFileRepository("jdbc:sqlite:" + addDbPath, null, addVaultFs);
                     try {
                         if (addRepo.vaultAliasExists(addAlias)) {
                             throw new IllegalArgumentException("Vault alias already exists: " + addAlias);
@@ -213,9 +280,19 @@ public final class Application {
         }
     }
 
-    // Token bootstrap: explicit --token wins (scripted use, no file touched);
-    // otherwise a fresh random token is generated at EVERY start and written
-    // 0600 to the token file — a leaked token dies at the next restart.
+    // Token bootstrap: `--enable-auth` is the sole auth switch (default off —
+    // the server stays loopback-only). When on, explicit --token wins
+    // (scripted use, no file touched); otherwise a fresh random token is
+    // generated at EVERY start and written 0600 to the token file — a leaked
+    // token dies at the next restart. When off nothing is generated or
+    // written, and --token alone is rejected as a usage error.
+    static String resolveApiToken(boolean enableAuth, String tokenFlag, String tokenFileFlag) throws IOException {
+        if (!enableAuth) {
+            return null;
+        }
+        return resolveToken(tokenFlag, tokenFileFlag);
+    }
+
     static String resolveToken(String tokenFlag, String tokenFileFlag) throws IOException {
         if (tokenFlag != null && !tokenFlag.isEmpty()) {
             return tokenFlag;
@@ -271,7 +348,7 @@ public final class Application {
         for (String spec : specs) {
             String[] parts = spec.split(":", 2);
             if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
-                logger.error("Invalid vault format '{}', skipping. Expected: alias:<source>", spec);
+                logger.error("Invalid vault format '{}', skipping. Expected: alias:<source>", io.pskenny.pkspkms.io.LogUtil.oneLine(spec));
                 continue;
             }
             byAlias.computeIfAbsent(parts[0], key -> new ArrayList<>()).add(parts[1]);
@@ -320,13 +397,25 @@ public final class Application {
                 .type(String.class)
                 .setDefault("127.0.0.1")
                 .help("Address to bind (default 127.0.0.1 — loopback only)");
+        serverParser.addArgument("--cors-origin")
+                .action(Arguments.append())
+                .type(String.class)
+                .help("Repeat. Cross-origin allow-list (e.g. moz-extension://UUID). '*' requires --enable-auth");
+        serverParser.addArgument("--enable-auth")
+                .action(Arguments.storeTrue())
+                .setDefault(Boolean.FALSE)
+                .help("Require bearer-token auth on every route except /ping and /webui (default: off — the server stays loopback-only)");
         serverParser.addArgument("--token")
                 .type(String.class)
-                .help("API token (argv — visible in ps; prefer --token-file)");
+                .help("API token (argv — visible in ps; prefer --token-file). Requires --enable-auth");
         serverParser.addArgument("--token-file")
                 .type(String.class)
                 .setDefault(java.nio.file.Path.of(System.getProperty("user.home"), ".config", "pkspkms", "token").toString())
                 .help("Where the fresh per-start API token is written (0600)");
+        serverParser.addArgument("--reset-db")
+                .action(Arguments.storeTrue())
+                .setDefault(Boolean.FALSE)
+                .help("Drop and rebuild the index from scratch (forces a full rescan)");
         serverParser.addArgument("--virtual-vault")
                 .type(String.class)
                 .action(Arguments.append())
@@ -371,6 +460,10 @@ public final class Application {
                 .action(Arguments.storeTrue())
                 .setDefault(Boolean.FALSE)
                 .help("Don't write any changes to disk.");
+        exportParser.addArgument("--reset-db")
+                .action(Arguments.storeTrue())
+                .setDefault(Boolean.FALSE)
+                .help("Drop and rebuild the index from scratch (forces a full rescan)");
     }
 
     private void addAddSubparser(Subparsers subparsers) {

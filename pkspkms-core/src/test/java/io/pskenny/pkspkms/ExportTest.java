@@ -1,3 +1,23 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * This file is part of PKSPKMS.
+ * Copyright (C) 2026 Paul Kenny
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package io.pskenny.pkspkms;
 
 import io.pskenny.pkspkms.io.PksFile;
@@ -78,14 +98,16 @@ tags:
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 true);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         assertEquals(false, fileExists(TEST_DIR + "/output/test.md"));
     }
@@ -108,14 +130,16 @@ tags:
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         assertEquals(text, readFile(TEST_DIR + "/output/test.md"));
     }
@@ -130,14 +154,16 @@ tags:
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         var expected = "[File1](File1.md)";
         var actual = readFile(TEST_DIR + "/output/File2.md");
@@ -154,14 +180,16 @@ tags:
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         var expected = "[File1](File1.txt)";
         var actual = readFile(TEST_DIR + "/output/File2.md");
@@ -190,14 +218,16 @@ tags:
                 "pkspkms.db",
                 "",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         byte[] exported = Files.readAllBytes(TEST_DIR.resolve("output/Media.jpg"));
         assertArrayEquals(original, exported);
@@ -217,14 +247,16 @@ tags:
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         var expected = "text";
         var actual = readFile(TEST_DIR + "/output/File2.md");
@@ -248,16 +280,19 @@ Other""");
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
-        var expected = "Other";
+        // flex round-trip: paragraphs carry the trailing newline (md-correct)
+        var expected = "Other\n";
         var actual = readFile(TEST_DIR + "/output/File6.md");
         assertEquals(expected, actual);
     }
@@ -318,27 +353,15 @@ Other""");
             }
         };
 
-        PksFileRepository repository = new PksFileRepository() {
+        PksFileRepository repository = new io.pskenny.pkspkms.test.UnsupportedPksRepository() {
             @Override
             public List<PksFile> searchRegular(io.pskenny.pkspkms.repo.query.CompiledQuery query) {
                 return List.of(new PksFile("note.md", new HashMap<>()));
             }
-
-            @Override public void loadDirectoryIntoRepository() { throw new UnsupportedOperationException(); }
-            @Override public void loadVirtualVault(PkmsFileSystem aliasFs, String alias) { throw new UnsupportedOperationException(); }
-            @Override public List<PksFile> loadCorpus() { throw new UnsupportedOperationException(); }
-            @Override public String resolveWikilink(String wikilink) { throw new UnsupportedOperationException(); }
-            @Override public int addVaultAlias(String alias, String directory, boolean isVirtual) { throw new UnsupportedOperationException(); }
-            @Override public boolean vaultAliasExists(String alias) { throw new UnsupportedOperationException(); }
-            @Override public Map<String, Object> cacheFile(String address, String location, String cacheDirectory) { throw new UnsupportedOperationException(); }
-            @Override public void createPropertyIndex(String propertyKey, String type) { throw new UnsupportedOperationException(); }
-            @Override public String getMarkdownFromLuaBase(String luaBaseYaml) { throw new UnsupportedOperationException(); }
-            @Override public String getMarkdownFromBase(String baseYaml) { throw new UnsupportedOperationException(); }
-            @Override public void close() { throw new UnsupportedOperationException(); }
         };
 
         Export.ExportConfig config = new Export.ExportConfig(
-                "vault", "unused.db", "", "out", "markdown", true);
+                "vault", "unused.db", "", "out", Export.ExportMode.MARKDOWN, true);
 
         new Export(config, repository, inputFs, inputFs).export();
 
@@ -356,17 +379,45 @@ Other""");
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         assertEquals("[My Display](File1.md)", readFile(TEST_DIR + "/output/File2.md"));
         assertEquals("[[Missing|X]]", readFile(TEST_DIR + "/output/File3.md")); // unresolved stays raw
+    }
+
+    @Test
+    @DisplayName("v7: frontmatter wikilinks stay literal in export; body links transform")
+    void testMarkdownExportLeavesFrontmatterLiteral() throws IOException {
+        createFile(TEST_DIR, "House.md", Map.of(), "house content");
+        // unquoted frontmatter value + a body link to the same target — only
+        // the BODY occurrence may transform
+        createFile(TEST_DIR, "fmw.md", Map.of("parent", "[[House]]"), "body [[House]] here");
+
+        Export.ExportConfig config = new Export.ExportConfig(TEST_DIR.toString(), "pkspkms.db",
+                "filePath:fmw.md", TEST_DIR + "/output", Export.ExportMode.MARKDOWN, false);
+        PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
+        PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
+
+        String exported = readFile(TEST_DIR + "/output/fmw.md");
+        assertTrue(exported.contains("parent: [[House]]"),
+                "frontmatter region is verbatim: " + exported);
+        assertTrue(exported.contains("body [House](House.md) here"),
+                "body links still transform: " + exported);
     }
 
     @Test
@@ -379,14 +430,16 @@ Other""");
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         // Non-markdown targets are never inlined: copy + keep the !, destination is the raw root-relative path
         assertEquals("![](Maus_ A Survivor's Tale-Hdbk - Art Spiegelman.cbz)",
@@ -404,14 +457,16 @@ Other""");
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         assertEquals("meeting-content", readFile(TEST_DIR + "/output/note.md"));
     }
@@ -498,7 +553,7 @@ Other""");
             }
         };
 
-        PksFileRepository repository = new PksFileRepository() {
+        PksFileRepository repository = new io.pskenny.pkspkms.test.UnsupportedPksRepository() {
             @Override
             public List<PksFile> searchRegular(io.pskenny.pkspkms.repo.query.CompiledQuery query) {
                 return List.of(
@@ -506,22 +561,10 @@ Other""");
                         new PksFile("b.md", new HashMap<>()),
                         new PksFile("c.md", new HashMap<>()));
             }
-
-            @Override public void loadDirectoryIntoRepository() { throw new UnsupportedOperationException(); }
-            @Override public void loadVirtualVault(PkmsFileSystem aliasFs, String alias) { throw new UnsupportedOperationException(); }
-            @Override public List<PksFile> loadCorpus() { throw new UnsupportedOperationException(); }
-            @Override public String resolveWikilink(String wikilink) { throw new UnsupportedOperationException(); }
-            @Override public int addVaultAlias(String alias, String directory, boolean isVirtual) { throw new UnsupportedOperationException(); }
-            @Override public boolean vaultAliasExists(String alias) { throw new UnsupportedOperationException(); }
-            @Override public Map<String, Object> cacheFile(String address, String location, String cacheDirectory) { throw new UnsupportedOperationException(); }
-            @Override public void createPropertyIndex(String propertyKey, String type) { throw new UnsupportedOperationException(); }
-            @Override public String getMarkdownFromLuaBase(String luaBaseYaml) { throw new UnsupportedOperationException(); }
-            @Override public String getMarkdownFromBase(String baseYaml) { throw new UnsupportedOperationException(); }
-            @Override public void close() { throw new UnsupportedOperationException(); }
         };
 
         Export.ExportConfig config = new Export.ExportConfig(
-                "vault", "unused.db", "", "out", "markdown", false);
+                "vault", "unused.db", "", "out", Export.ExportMode.MARKDOWN, false);
 
         new Export(config, repository, inputFs, outputFs).export();
 
@@ -536,17 +579,20 @@ Other""");
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 dryRun);
     }
 
     private void exportWithConfig(Export.ExportConfig config) {
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // Close the repository: the connection must release cleanly or the
+        // -wal/-shm sidecars linger past the JVM (clean-close contract).
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
     }
 
     @Test
@@ -712,7 +758,7 @@ Other""");
                 "pkspkms.db",
                 "filePath:note.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         exportWithConfig(config);
 
@@ -728,6 +774,166 @@ Other""");
         exportWithConfig(markdownConfig(false));
 
         assertTrue(fileExists(TEST_DIR + "/output/50%.txt"));
+    }
+
+    // --- B9: a hard-failing embed exports as empty, never "ERROR" or raw YAML ---
+
+    @Test
+    @DisplayName("Failing base embed exports empty, no ERROR literal or YAML leak")
+    void testMarkdownExportFailingBaseExportsEmpty() throws IOException {
+        // YAML parse failure in the view → embed render → "ERROR" diagnostic;
+        // the export must replace the block with an empty render
+        createFile(TEST_DIR, "note.md", Map.of(), """
+                ```base
+                views:
+                  - [unclosed
+                ```
+                """);
+        exportWithConfig(markdownConfig(false));
+
+        String out = readFile(TEST_DIR + "/output/note.md");
+        assertFalse(out.contains("ERROR"), out);
+        assertFalse(out.contains("unclosed"), "raw yaml must not leak: " + out);
+        assertFalse(out.contains("```base"), out);
+    }
+
+    // --- BUGS.md 12 closed as by-design: virtual vaults are not export targets ---
+
+    @Test
+    @DisplayName("Virtual-vault subjects are skipped with intent, main vault still exports")
+    void testExportSkipsVirtualVaultSubjectsByDesign() throws IOException {
+        createFile(TEST_DIR, "main.md", Map.of("tags", "export-this"), "main body");
+
+        Path virtualDir = Paths.get("target", "test-notes", "export-skip-virtual");
+        Files.createDirectories(virtualDir.resolve("sub"));
+        createFile(virtualDir, "sub/virtual.md", Map.of("tags", "export-this"), "virtual body");
+
+        try {
+            Export.ExportConfig config = new Export.ExportConfig(
+                    TEST_DIR.toString(),
+                    "pkspkms.db",
+                    "tags:export-this",
+                    TEST_DIR + "/output",
+                    Export.ExportMode.MARKDOWN,
+                    false);
+            PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
+            PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
+            try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), null, inputFs)) {
+                repository.loadDirectoryIntoRepository();
+                // isolation: earlier runs leave the alias row in the shared
+                // fixture db — clear it before this re-mount
+                try (var conn = java.sql.DriverManager.getConnection("jdbc:sqlite:" + config.dbPath());
+                     var stmt = conn.createStatement()) {
+                    stmt.executeUpdate("DELETE FROM VAULT_ALIASES WHERE alias='peer'");
+                } catch (java.sql.SQLException cleanupFailure) {
+                    // nothing to clean: fresh fixture db
+                }
+                repository.loadVirtualVault(new JavaFileSystem(virtualDir.toFile()), "peer");
+                export = new Export(config, repository, inputFs, outputFs);
+                export.export();
+            }
+
+            assertTrue(fileExists(TEST_DIR + "/output/main.md"), "main vault exports normally");
+            assertFalse(fileExists(TEST_DIR + "/output/@peer/sub/virtual.md"),
+                    "virtual vault subjects are not written");
+            assertFalse(fileExists(TEST_DIR + "/output/peer"), "no alias output path by design");
+        } finally {
+            try (var walk = Files.walk(virtualDir)) {
+                walk.sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(java.io.File::delete);
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    // --- B14: fenced demo embeds must not expand ---
+
+    @Test
+    @DisplayName("Embed inside a code fence is left verbatim (B14/B15)")
+    void testMarkdownExportFencedEmbedNotExpanded() throws IOException {
+        String note = "Real target exists:\n\n```md\n![[Target.md]]\n```\n";
+        createFile(TEST_DIR, "Target.md", Map.of(), "target-content");
+        createFile(TEST_DIR, "note.md", Map.of(), note);
+        exportWithConfig(markdownConfig(false));
+
+        assertEquals(note, readFile(TEST_DIR + "/output/note.md"), "fenced demo untouched");
+    }
+
+    // --- B20: identical content skips the copy, changed content recopies ---
+
+    @Test
+    @DisplayName("Unchanged linked file keeps its output mtime")
+    void testMarkdownExportUnchangedLinkedFileSkipsRecopy() throws IOException {
+        createFile(TEST_DIR, "media.png", Map.of(), "pixels");
+        createFile(TEST_DIR, "note.md", Map.of(), "[img](media.png)");
+        exportWithConfig(markdownConfig(false));
+        Path out = TEST_DIR.resolve("output/media.png");
+        java.nio.file.attribute.FileTime pinned =
+                java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() - 3_600_000);
+        Files.setLastModifiedTime(out, pinned);
+
+        exportWithConfig(markdownConfig(false)); // identical second pass
+
+        assertEquals(pinned.toMillis(), Files.getLastModifiedTime(out).toMillis(),
+                "identical content must not be re-copied");
+    }
+
+    @Test
+    @DisplayName("Changed linked file is re-copied even when output exists")
+    void testMarkdownExportChangedLinkedFileRecopied() throws IOException {
+        createFile(TEST_DIR, "media.png", Map.of(), "pixels");
+        createFile(TEST_DIR, "note.md", Map.of(), "[img](media.png)");
+        exportWithConfig(markdownConfig(false));
+        Path out = TEST_DIR.resolve("output/media.png");
+        java.nio.file.attribute.FileTime pinned =
+                java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() - 3_600_000);
+        Files.setLastModifiedTime(out, pinned);
+
+        Files.writeString(TEST_DIR.resolve("media.png"), "pixels-v2");
+        exportWithConfig(markdownConfig(false));
+
+        assertEquals("pixels-v2", readFile(TEST_DIR + "/output/media.png"),
+                "changed source must overwrite the stale copy");
+    }
+
+    @Test
+    @DisplayName("Content compare works even without a FILES row")
+    void testMarkdownExportHashCompareWithoutFilesRow() throws Exception {
+        createFile(TEST_DIR, "extra.png", Map.of(), "bytes");
+        createFile(TEST_DIR, "note.md", Map.of(), "[x](extra.png)");
+        exportWithConfig(markdownConfig(false));
+
+        // Simulate a FILES row vanished (cacheFile-style): output stays intact
+        try (java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:sqlite:pkspkms.db");
+             java.sql.Statement stmt = conn.createStatement()) {
+            stmt.execute("DELETE FROM FILES WHERE file_path = 'extra.png'");
+        }
+
+        java.nio.file.attribute.FileTime pinned =
+                java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() - 3_600_000);
+        Files.setLastModifiedTime(TEST_DIR.resolve("output/extra.png"), pinned);
+        exportWithConfig(markdownConfig(false));
+
+        assertEquals(pinned.toMillis(),
+                Files.getLastModifiedTime(TEST_DIR.resolve("output/extra.png")).toMillis(),
+                "input-stream fallback hash must match the skipped copy");
+    }
+
+    // --- B8: embedded content keeps real backslashes, unescapes renderer escapes ---
+
+    @Test
+    @DisplayName("Embedded backslashes survive except markdown escapes (B8)")
+    void testMarkdownExportEmbedBackslashesSurvive() throws IOException {
+        createFile(TEST_DIR, "target.md", Map.of(), """
+                ## Section
+
+                Path `C:\\Users\\pk\\notes` and plain `back\\slash`.
+                """);
+        createFile(TEST_DIR, "note.md", Map.of(), "![[target.md#Section]]");
+        exportWithConfig(markdownConfig(false));
+
+        String out = readFile(TEST_DIR + "/output/note.md");
+        assertTrue(out.contains("C:\\Users\\pk\\notes"), "Windows path intact, was: " + out);
+        assertTrue(out.contains("back\\slash"), "non-escapable backslashes intact");
     }
 
     @Test
@@ -812,29 +1018,17 @@ Other""");
             }
         };
 
-        PksFileRepository repository = new PksFileRepository() {
+        PksFileRepository repository = new io.pskenny.pkspkms.test.UnsupportedPksRepository() {
             @Override
             public List<PksFile> searchRegular(io.pskenny.pkspkms.repo.query.CompiledQuery query) {
                 PksFile note = new PksFile("note.md", new HashMap<>());
                 note.getMutableProperties().put("links", List.of("bad.txt", "good.txt"));
                 return List.of(note);
             }
-
-            @Override public void loadDirectoryIntoRepository() { throw new UnsupportedOperationException(); }
-            @Override public void loadVirtualVault(PkmsFileSystem aliasFs, String alias) { throw new UnsupportedOperationException(); }
-            @Override public List<PksFile> loadCorpus() { throw new UnsupportedOperationException(); }
-            @Override public String resolveWikilink(String wikilink) { throw new UnsupportedOperationException(); }
-            @Override public int addVaultAlias(String alias, String directory, boolean isVirtual) { throw new UnsupportedOperationException(); }
-            @Override public boolean vaultAliasExists(String alias) { throw new UnsupportedOperationException(); }
-            @Override public Map<String, Object> cacheFile(String address, String location, String cacheDirectory) { throw new UnsupportedOperationException(); }
-            @Override public void createPropertyIndex(String propertyKey, String type) { throw new UnsupportedOperationException(); }
-            @Override public String getMarkdownFromLuaBase(String luaBaseYaml) { throw new UnsupportedOperationException(); }
-            @Override public String getMarkdownFromBase(String baseYaml) { throw new UnsupportedOperationException(); }
-            @Override public void close() { throw new UnsupportedOperationException(); }
         };
 
         Export.ExportConfig config = new Export.ExportConfig(
-                "vault", "unused.db", "", "out", "markdown", false);
+                "vault", "unused.db", "", "out", Export.ExportMode.MARKDOWN, false);
 
         new Export(config, repository, inputFs, outputFs).export();
 

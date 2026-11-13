@@ -1,3 +1,23 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * This file is part of PKSPKMS.
+ * Copyright (C) 2026 Paul Kenny
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package io.pskenny.pkspkms;
 
 import io.pskenny.pkspkms.io.fs.PkmsFileSystem;
@@ -21,6 +41,8 @@ import java.util.stream.Stream;
 
 import static io.pskenny.pkspkms.test.FileUtil.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ExportEmbedTest {
     Export export;
@@ -68,14 +90,16 @@ views:
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), SQLiteLuaConnector.luaFunctionRegistrar(), inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), SQLiteLuaConnector.luaFunctionRegistrar(), inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         var expected = """
 | Path |
@@ -106,14 +130,16 @@ views:
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), SQLiteLuaConnector.luaFunctionRegistrar(), inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), SQLiteLuaConnector.luaFunctionRegistrar(), inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         var expected = """
 | Path |
@@ -145,14 +171,16 @@ views:
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), SQLiteLuaConnector.luaFunctionRegistrar(), inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), SQLiteLuaConnector.luaFunctionRegistrar(), inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         var expected = """
 | Path |
@@ -189,14 +217,16 @@ views:
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), SQLiteLuaConnector.luaFunctionRegistrar(), inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), SQLiteLuaConnector.luaFunctionRegistrar(), inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         var expected = """
 | filePath | description |
@@ -208,10 +238,58 @@ views:
         assertEquals(expected, actual);
     }
 
+    // --- B9 closing pin: the converter supports fileFieldStartsWith-shaped
+    // filters end-to-end (converter → Lua render → EMBEDS → export cell) ---
+
+    @Test
+    @DisplayName("Export renders fileFieldStartsWith base filter end-to-end")
+    void testMarkdownExportFileFieldStartsWithBaseEmbed() throws IOException {
+        createFile(TEST_DIR, "File1.md", Map.of("tags", "Tag1"), "");
+        createFile(TEST_DIR, "Other.md", Map.of(), "");
+        createFile(TEST_DIR, "File2.md", Map.of(), """
+                ```base
+                views:
+                  - type: table
+                    filters:
+                      and:
+                        - file.name.startsWith("File")
+                    order:
+                      - 'getPropertyValue(file, "filePath"), "Path"'
+                ```
+                """);
+        Export.ExportConfig config = new Export.ExportConfig(
+                TEST_DIR.toString(),
+                "pkspkms.db",
+                "filePath:File2.md",
+                TEST_DIR + "/output",
+                Export.ExportMode.MARKDOWN,
+                false);
+        PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
+        PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), SQLiteLuaConnector.luaFunctionRegistrar(), inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
+
+        String expected = """
+                | Path |
+                |---|
+                | File2.md |
+                | File1.md |
+                """;
+        String actual = readFile(TEST_DIR + "/output/File2.md").strip();
+        // B9 pin: the fileFieldStartsWith converter path renders (File2.txt's own
+        // name also matches "File", Other.md must be filtered out)
+        assertTrue(actual.contains("| File1.md |"), actual);
+        assertFalse(actual.contains("Other"), actual);
+        assertFalse(actual.contains("|  |"), actual);
+    }
+
 //    @Test
     @DisplayName("Export replaces simple embedded Base table with Markdown table displaying tags properties")
-    void testMarkdownExportReplacesBaseEmbed_WithTagsProperties() throws IOException {
-        createFile(TEST_DIR, "File1.md", Map.of("tags", "Tag1"), "");
+    void testMarkdownExportReplacesBaseEmbed_WithTagsProperties() throws IOException {        createFile(TEST_DIR, "File1.md", Map.of("tags", "Tag1"), "");
         createFile(TEST_DIR, "File2.md", Map.of(), """
 ```base
 views:
@@ -230,14 +308,16 @@ views:
                 "pkspkms.db",
                 "filePath:*.md",
                 TEST_DIR + "/output",
-                "markdown",
+                Export.ExportMode.MARKDOWN,
                 false);
         PkmsFileSystem inputFs = new JavaFileSystem(TEST_DIR.toFile());
         PkmsFileSystem outputFs = new JavaFileSystem(new File(TEST_DIR + "/output"));
-        SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), SQLiteLuaConnector.luaFunctionRegistrar(), inputFs);
-        repository.loadDirectoryIntoRepository();
-        export = new Export(config, repository, inputFs, outputFs);
-        export.export();
+        // try-with: clean close deletes the -wal/-shm sidecars (leftover pact)
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository("jdbc:sqlite:" + config.dbPath(), SQLiteLuaConnector.luaFunctionRegistrar(), inputFs)) {
+            repository.loadDirectoryIntoRepository();
+            export = new Export(config, repository, inputFs, outputFs);
+            export.export();
+        }
 
         var expected = """
 | filePath | description |

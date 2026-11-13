@@ -1,0 +1,277 @@
+# PKSPKMS
+
+PK's Personal Knowledge Management Software.
+
+It provides a single user HTTP API and command-line export tool for a single directory
+personal knowledge management software (like an Obsidian Vault). Supports
+Lucene-style property search **and** full-text search of note bodies (`text:` clauses, SQLite FTS5,
+ranked with snippets). Extraction runs through one spec-grammar markdown parse per note — outline
+and parse-time wikilink spans ride search hits as generated keys.
+
+## Structure
+
+[Architecture notes](docs/core/Architecture.md) — the load-bearing invariants (canon vs. cache, role interfaces, dispatch tables) in one place.
+
+This is a multi-module Maven project:
+
+- **`pkspkms-core`** — Reusable library containing domain objects, parsers, the query engine, repository abstractions, and the HTTP server.
+- **`pkspkms-desktop`** — Executable desktop launcher with CLI parsing and optional system tray.
+
+## Build And Run
+
+Make sure you have Maven and JDK 17 installed and running correctly. The following commands use the example directory
+in this repo (`test/data/pkms-examples/example`), you can try it out on your own data by replacing that value with your own directory.
+
+For reference:
+
+```text
+test/data/pkms-examples/example
+├── Example.md
+├── Notes
+│   ├── Backlink-for-Resolved-Wikilink.md
+│   ├── PKSPKMS.md
+│   ├── Resolved Wikilink.md
+│   └── Tasks
+│       └── Task.md
+├── README.md
+└── Resources
+    └── Neumann.jpg
+```
+
+### Quick Start (build + install)
+
+```shell
+# Clone and build
+git clone git@github.com:pskenny/pkspkms.git ~/pkspkms
+cd pkspkms
+
+# Build the fat JAR (checks Java 17+ and Maven 3.6+) and installs to ~/.local (creates a 'pkspkms' command)
+./build.sh && ./install.sh
+```
+
+### Try Out Exporting
+
+```shell
+mkdir temp-dir
+pkspkms export --directory test/data/pkms-examples/example --query "" --output temp-dir --type "markdown" --db index.db
+```
+
+### Try out the server
+
+```shell
+# Start server at port 23467 using test directory (default port is 3000).
+# Keep the index outside the vault directory if you sync the vault — it
+# persists across starts
+pkspkms server --directory test/data/pkms-examples/example --port 23467 --db index.db
+# Auth is opt-in — same start with bearer auth required:
+# pkspkms server --directory test/data/pkms-examples/example --port 23467 --enable-auth
+# In another terminal (only when --enable-auth is on):
+curl -H "Authorization: Bearer $(cat ~/.config/pkspkms/token)" "http://localhost:23467/files/list" | jq .
+```
+
+**Auth is opt-in.** Without `--enable-auth` the routes (except `/ping` and the
+`/webui` pages) answer without an Authorization header — the protections are
+the loopback-only bind and the Host-header allow-list. With `--enable-auth` a
+random token is generated each start, written to `~/.config/pkspkms/token`
+(0600, owner-only), and every protected route requires the bearer header —
+see [Access & tokens](#access--tokens).
+
+### Browser extension / cross-origin access
+
+Cross-origin requests (a browser extension, or any other site serving pages
+that fetch your vault) need an explicit CORS allow-list. **Default: closed —
+no CORS headers at all.**
+
+```shell
+# Option 1 — token-gated wildcard: any origin may call, token still required
+pkspkms server --directory <vault> --enable-auth --cors-origin '*'
+# Option 2 — allow-list the extension origin (Firefox: copy the origin from
+# the blocked-request console message; it changes per install):
+pkspkms server --directory <vault> --cors-origin 'moz-extension://a1b2…'
+```
+
+With Option 1 the extension sends `Authorization: Bearer $(cat
+~/.config/pkspkms/token)` on every `fetch`; with Option 2 the vault is
+unauthenticated to that origin + any same-machine page with the same origin —
+prefer Option 1. `--cors-origin '*'` without `--enable-auth` is a startup
+error (any web page would read the vault). Preflight `OPTIONS` requests are
+answered without the token (the CORS spec requires it); the actual data
+requests keep the auth gate.
+
+### Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /ping` | Liveness check (no token) |
+| `GET /files/list?query=<q>` | Query files by property (Lucene-style syntax); empty `query` matches all |
+| `GET /files/list/graph?query=<q>` | Same, reduced to `filePath`, `links`, `backlinks`, `tags` |
+| `GET /files/manifest` | Per-virtual-vault `{filePath, blake3}` pairs for `pkspkms://` targets |
+| `GET /webui/` | Browser UI (no token) |
+| `POST /cache/{address}/{location}?directory=<dir>` | Copy a file from a virtual vault into the cache directory (POST only) |
+| `GET /openapi.json` | OpenAPI 3.0 spec (`servers` URL rewritten to the running port) |
+| `GET /webui/swagger` | Swagger UI rendering the spec |
+| `POST /mcp` | MCP (Model Context Protocol) endpoint — exposes the vault as tools to AI clients |
+
+Query syntax (Lucene-style): `tags:PKSPKMS`, `filePath:*.md`, `NOT tags:Archive`, `price:[1 TO 5]`, `status:(todo OR done)`, quoted phrases, wildcards `* ?`. Malformed queries return HTTP 400.
+
+### MCP (AI clients)
+
+`POST /mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) endpoint (streamable HTTP, JSON
+responses — no SSE stream, no sessions), so MCP clients like OpenCode, Claude Code or Cline can query your
+vault directly. Full tool reference: [docs/core/MCP.md](docs/core/MCP.md).
+
+| Tool | Description |
+|------|-------------|
+| `search` | Lucene-style property queries → `{files, resultSize, totalSize}`; `text:` FTS, `sort`/`limit`/`offset` |
+| `read_file` | Raw markdown; optional `head_lines`/`head_chars` caps |
+| `graph` | Search reduced to `{filePath, links, backlinks, tags}` |
+| `manifest` | Per-virtual-vault `{filePath, blake3}` pairs |
+| `resolve_wikilink` | Wikilink target → vault path (filenames, then frontmatter `aliases`) |
+| `facets` | Value counts over a filtered result set (drill-down) |
+| `related` / `orphans` / `graph_hops` | Link-graph views: one-hop, no-edge notes, 1–2-hop neighborhoods |
+| `backlinks` | Inbound links with `line`/`via`/`context` provenance |
+| `broken_links` | Refcount-ranked dangling-wikilink report |
+| `tasks` | Open checkbox tasks, scoped or vault-wide (`tasksDone:*` for done) |
+| `search_and_read` / `recent` | Search + capped heads in one call; newest notes first |
+| `binary_file` | stat / bounded-Base64 reads (≤ 5 MB) |
+
+**When `--enable-auth` is on**, `POST /mcp` sits behind the same bearer token as every other route. Example (OpenCode):
+
+```shell
+opencode mcp add pkspkms --type remote --url http://localhost:3000/mcp \
+  --header "Authorization: Bearer $(cat ~/.config/pkspkms/token)"
+```
+
+Remember the token rotates on every server restart — re-run `cat` (or re-add) after each start, same as any
+other API client. Path traversal, `.obsidian` and `.trash` are rejected by `read_file`. Without
+`--enable-auth` the URL needs no header at all.
+
+### Virtual vaults
+
+Mount other directories alongside the main vault with `@alias/`-prefixed paths:
+
+```shell
+pkspkms server --directory <vault> --virtual-vault gwern:/path/to/other/vault --port 3000
+```
+
+OPML outlines and syndication feeds mount the same way:
+
+```shell
+pkspkms server --directory <vault> --opml-vault "scy:/path/to/peer.opml" --feed-vault "news:https://hnrss.org/frontpage?count=5"
+```
+
+`--opml-vault` materializes outliner nodes as notes and mounts `xmlUrl`
+outlines as feeds; `--feed-vault` mounts RSS/Atom/podcast feeds (channel note
++ date-prefixed item notes). Failures degrade per vault/source without
+  blocking startup. See [docs/core/Virtual PKMS.md](docs/core/Virtual%20PKMS.md).
+
+### Access & tokens
+
+- **Auth is opt-in: `--enable-auth` turns it on.** Nothing is generated or
+  written without the flag.
+- **With `--enable-auth`**, a fresh random token is generated at every
+  startup and written to `~/.config/pkspkms/token` (0600, owner-only) —
+  `cat` it after each restart; anything that cached a copy breaks per
+  restart by design. Send it as
+  `Authorization: Bearer $(cat ~/.config/pkspkms/token)` on every request
+  except `/ping` and the `/webui` pages.
+- `--token <secret>` and `--token-file <path>` only work together with
+  `--enable-auth`; `--token` alone is a usage error (never a silent
+  no-auth server). `--token` overrides generation (argv leaks via `ps`;
+  prefer reading the file); `--token-file` picks where the fresh token is
+  written.
+- `--bind <addr>` re-binds beyond loopback if you really want LAN access —
+  with `--enable-auth` on then, always.
+- **Webui known gap:** the page loads, but its search calls don't carry the
+  token (no `?token=` → cookie flow exists in the code yet) — until that flow
+  ships, use the bearer header or the webui's Swagger UI.
+
+### System Tray
+
+On desktop environments with a system tray, you can add `--tray` to show an icon with a right-click menu:
+
+```shell
+java -jar pkspkms-desktop/target/pkspkms-desktop-0.1.0.jar server --directory test/data/pkms-examples/example --port 9239 --tray
+```
+
+The tray icon shows the server status, port, vault path, and the last log line. The menu includes an **"Open in Browser"** action and a **"Quit"** action for graceful shutdown. If the tray cannot be initialized (e.g. on a headless server), the application logs a warning and continues normally.
+
+Returns:
+
+```json
+{
+  "resultSize": 6,
+  "files"     : [
+    {
+      "title"   : "README",
+      "tags"    : ["PKSPKMS", "Development", "Documentation"],
+      "filePath": "README.md"
+    },
+    {
+      "shouldBeANumber"    : 42,
+      "filePath"           : "Notes/PKSPKMS.md",
+      "links"              : ["Notes/Resolved Wikilink.md", "../Resources/Neumann.jpg"],
+      "title"              : "Different title than file name",
+      "anotherYamlProperty": "test data",
+      "tags"               : ["Meta", "PKSPKMS", "Tag"]
+    },
+    { "tags": ["Task"], "filePath": "Notes/Tasks/Task.md" },
+    {
+      "aliases" : ["Resolved Wikilink Defined By YAML Frontmatter alias"],
+      "title"   : "Resolved Wikilink Defined By YAML Frontmatter title",
+      "tags"    : ["Example"],
+      "filePath": "Notes/Resolved Wikilink.md"
+    },
+    {
+      "links"   : ["Resources/Neumann.jpg"],
+      "title"   : "Example Title",
+      "tags"    : ["Example"],
+      "filePath": "Example.md"
+    },
+    {"filePath": "Resources/Neumann.jpg"}
+  ]
+}
+```
+
+You can also query it, such as `curl -H "Authorization: Bearer $(cat ~/.config/pkspkms/token)" "http://localhost:9239/files/list?query=tags:Tag" | jq .` returns:
+
+```json
+{
+  "resultSize": 1,
+  "files"     : [
+    {
+      "shouldBeANumber"    : 42,
+      "filePath"           : "Notes/PKSPKMS.md",
+      "links"              : ["Notes/Resolved Wikilink.md", "../Resources/Neumann.jpg"],
+      "title"              : "Different title than file name",
+      "anotherYamlProperty": "test data",
+      "tags"               : ["Meta", "PKSPKMS", "Tag"]
+    }
+  ]
+}
+```
+
+### Testing
+
+```shell
+# Run all tests across both modules
+mvn clean test
+# Run core tests only
+mvn test -pl pkspkms-core
+# Generate Jacoco report (core module)
+mvn test -pl pkspkms-core
+open pkspkms-core/target/site/jacoco/index.html
+```
+
+## Logging
+
+Logging is SLF4J/simple, `INFO` by default. Turn on debug output per package:
+
+```shell
+java -Dorg.slf4j.simpleLogger.log.io.pskenny.pkspkms=debug -jar pkspkms-desktop/target/pkspkms-desktop-0.1.0.jar server --directory <vault> --port 3000
+```
+
+## Quirks
+
+- For compatibility uses same types for Markdown frontmatter as Obsidian: `date`, `datetime`, `number`, `text`,
+  `multitext`, `checkbox`

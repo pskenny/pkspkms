@@ -1,3 +1,23 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * This file is part of PKSPKMS.
+ * Copyright (C) 2026 Paul Kenny
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package io.pskenny.pkspkms.io.feed;
 
 import java.io.IOException;
@@ -7,6 +27,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 /** HTTP fetching for remote feeds and OPML subscriptions. Fetch-once-per-start. */
 public final class FeedFetcher {
@@ -30,23 +52,93 @@ public final class FeedFetcher {
     static java.util.function.Consumer<Long> sleeper = FeedFetcher::sleepMs;
     static java.util.function.LongSupplier clockNanos = System::nanoTime;
 
-    // SSRF guard seam: production rejects loopback/link-local/private-range
-    // targets; FeedFetcherTest swaps it (harness servers run on loopback)
+    // SSRF guard seams: production rejects loopback/link-local/private-range
+    // targets; FeedFetcherTest swaps them (harness servers run on loopback)
     static java.util.function.Predicate<String> hostGuard = FeedFetcher::isPublicHost;
 
-    // Resolvable hosts must be public — loopback/link-local/private-range
-    // fetches are refused (B22)
-    static boolean isPublicHost(String host) {
-        if (host == null || host.isEmpty()) {
-            return false;
-        }
+    // H5: policy is now RRSET-level — every resolvable address must be
+    // public, so an attacker cannot rotate a mixed record past a single
+    // good-looking answer. Resolution goes through a seam so tests can fake
+    // DNS (java.net has no JVM-local resolver hook).
+    static java.util.function.Function<String, java.net.InetAddress[]> resolver = FeedFetcher::defaultResolver;
+
+    static java.net.InetAddress[] defaultResolver(String host) {
         try {
-            java.net.InetAddress addr = java.net.InetAddress.getByName(host);
-            return !addr.isLoopbackAddress() && !addr.isSiteLocalAddress()
-                    && !addr.isLinkLocalAddress() && !addr.isAnyLocalAddress();
+            return java.net.InetAddress.getAllByName(host);
         } catch (java.net.UnknownHostException e) {
+            return new java.net.InetAddress[0];
+        }
+    }
+
+    // Post-read pin (H5): after the body was read, the host must still
+    // resolve to one of the ADDRESSES validated before the fetch. A DNS
+    // rebinder now waits ≤10 MB into a discarded buffer instead of landing
+    // private content in the index. Swappable for the loopback harness.
+    static java.util.function.BiPredicate<String, java.util.Set<java.net.InetAddress>> resolutionPin =
+            FeedFetcher::resolutionMatches;
+
+    private static final int MAX_ADDRESSES = 16;
+
+    static List<java.net.InetAddress> resolveAll(String host) {
+        if (host == null || host.isEmpty()) {
+            return List.of();
+        }
+        java.net.InetAddress[] answers = resolver.apply(host);
+        if (answers == null || answers.length == 0 || answers.length > MAX_ADDRESSES) {
+            return List.of();
+        }
+        return List.of(answers);
+    }
+
+    // Resolvable hosts must be public — loopback/link-local/private-range
+    // fetches are refused (B22), and the classification extends to ranges
+    // InetAddress does not know: CGNAT 100.64/10 and benchmarking 198.18/15
+    static boolean isPublicAddress(java.net.InetAddress addr) {
+        if (addr.isLoopbackAddress() || addr.isAnyLocalAddress() || addr.isMulticastAddress()
+                || addr.isLinkLocalAddress() || addr.isSiteLocalAddress()) {
             return false;
         }
+        byte[] b = addr.getAddress();
+        if (b.length == 4) {
+            int first = b[0] & 0xFF;
+            int second = b[1] & 0xFF;
+            if (first == 100 && (second & 0xC0) == 0x40) {
+                return false; // CGNAT 100.64.0.0/10 — second octet 64..127
+            }
+            if (first == 198 && second >= 18 && second <= 19) {
+                return false; // benchmarking 198.18.0.0/15
+            }
+        }
+        return true;
+    }
+
+    // Resolvable hosts must be public — loopback/link-local/private-range
+    // fetches are refused (B22); RRset form (H5). Kept as the default guard
+    // so the test seam and restore reference the same method.
+    static boolean isPublicHost(String host) {
+        List<java.net.InetAddress> answers = resolveAll(host);
+        if (answers.isEmpty()) {
+            return false;
+        }
+        for (java.net.InetAddress answer : answers) {
+            if (!isPublicAddress(answer)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean resolutionMatches(String host, java.util.Set<java.net.InetAddress> validated) {
+        List<java.net.InetAddress> answers = resolveAll(host);
+        if (answers.isEmpty() || validated.isEmpty()) {
+            return false;
+        }
+        for (java.net.InetAddress answer : answers) {
+            if (validated.contains(answer)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // --- per-host pacing (AIMD) ---
@@ -129,7 +221,7 @@ public final class FeedFetcher {
     }
 
     // Fetch policy: scheme http(s), host not loopback/link-local/private-range
-    private static void checkTarget(URI target) throws IOException {
+    private static void checkTarget(URI target, List<java.net.InetAddress> validatedOut) throws IOException {
         String scheme = target.getScheme() == null ? "" : target.getScheme().toLowerCase(java.util.Locale.ROOT);
         if (!scheme.equals("http") && !scheme.equals("https")) {
             throw new IOException("non-http(s) feed target refused: " + target);
@@ -137,6 +229,9 @@ public final class FeedFetcher {
         if (!hostGuard.test(target.getHost())) {
             throw new IOException("Feed fetch refused private/loopback target: " + target);
         }
+        // The answers the guard judged go alongside: the post-read pin (H5)
+        // compares new DNS answers against exactly these.
+        validatedOut.addAll(resolveAll(target.getHost()));
     }
 
     static byte[] httpGet(String url) throws IOException {
@@ -150,7 +245,8 @@ public final class FeedFetcher {
             if (attempts >= MAX_ATTEMPTS) {
                 throw failure != null ? failure : new IOException("Feed fetch exhausted retries: " + url);
             }
-            checkTarget(target);
+            List<java.net.InetAddress> validated = new ArrayList<>();
+            checkTarget(target, validated);
             Throttle throttle = THROTTLES.computeIfAbsent(hostOf(target), host -> new Throttle());
             acquire(throttle, retryDelayMs);
             retryDelayMs = 0;
@@ -179,7 +275,7 @@ public final class FeedFetcher {
                     throw new IOException("Redirect without Location: " + url);
                 }
                 URI next = target.resolve(location);
-                checkTarget(next);
+                checkTarget(next, new ArrayList<>());
                 target = next;
                 attempts = 0;
                 continue;
@@ -190,6 +286,14 @@ public final class FeedFetcher {
             }
 
             byte[] body = readBody(response.body(), url);
+            // Post-read pin (H5): the response is only valid while the host
+            // still resolves to one of the validated addresses. A changed
+            // RRset marks a rebinding attempt — the bytes were read (cap
+            // applied) but land in nothing: no index, no cache, no export.
+            if (!resolutionPin.test(target.getHost(), java.util.Set.copyOf(validated))) {
+                throw new IOException(
+                        "Feed host resolution changed mid-fetch — DNS rebinding pattern, discarding: " + url);
+            }
             synchronized (throttle) {
                 throttle.minIntervalMs = shrinkInterval(throttle.minIntervalMs);
             }

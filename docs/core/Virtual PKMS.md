@@ -66,14 +66,20 @@ renders a player; items whose `url` is a YouTube link (watch, youtu.be,
 shorts) embed a normalized `![](https://www.youtube.com/watch?v=…)` player.
 Nothing is downloaded.
 
-downloaded. Feeds are fetched once per server start and 301-style redirects
-(http → https) are followed; a feed that fails to fetch or parse logs an
-error and the vault is skipped — the server keeps running. Fetching adapts
-per host: request spacing starts at zero and backs off when a host answers
-429/503 (honoring `Retry-After`, retrying twice before giving up on that
-feed), then recovers on success — large subscription bursts mount without
-being rate limited. These vaults are
-read-only: the `/cache` endpoint copies items into your vault as usual.
+downloaded. Feeds are fetched once per server start; 301/302/307/308
+redirects are followed and every hop is re-validated (see security note
+below). Sources fail independently — a dead feed logs a warning and is
+skipped while the remaining sources mount. A fetch adapts per host: request
+spacing starts at zero and backs off when a host answers 429/503 (honoring
+`Retry-After`, retrying twice before giving up on that feed), then recovers
+on success — large subscription bursts mount without being rate limited.
+These vaults are read-only: the `/cache` endpoint copies items into your
+vault as usual.
+
+> [!NOTE] Feed fetching is http(s)-only over public addresses: loopback,
+> link-local and private-range targets are refused, and every redirect hop is
+> re-validated — a peer-controlled feed can never pull a private-network URL.
+> Bodies are capped at 10 MB.
 
 > [!NOTE] These flags are separate from `--virtual-vault` because URLs contain
 > colons, which collide with the `alias:/path` split.
@@ -92,5 +98,7 @@ Once loaded, the vault's files are stored in the database with `@alias/`-prefixe
 paths (e.g. `@bob/git.md`), and wikilinks resolve across all loaded vaults by
 file name and path. See [Querying](Querying.md) for searching across vaults.
 
-> [!NOTE] Wikilink resolution across vaults currently has caveats — duplicate
-> names and cross-vault collisions resolve nondeterministically (BUGS.md B16/B17).
+> [!NOTE] Wikilink resolution rules: duplicate names resolve deterministically
+> (vault-local files first, then the shortest path, then lexicographic), and
+> load-time wikilinks only resolve inside their own vault — use the MCP
+> `resolve_wikilink` tool for cross-vault lookups by name.

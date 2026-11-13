@@ -1,3 +1,23 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * This file is part of PKSPKMS.
+ * Copyright (C) 2026 Paul Kenny
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package io.pskenny.pkspkms.luabase;
 
 import org.slf4j.Logger;
@@ -5,6 +25,8 @@ import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
+
+import io.pskenny.pkspkms.io.YamlParser;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -502,6 +524,17 @@ public class NaiveBaseToLuaBaseConverter {
 
         String resolvedProperty = PropertyMapping.resolve(jsText);
         String maybeNegate = jsText.startsWith("!") || jsText.contains("!") ? " not " : "";
+
+        // Already a full Lua spec (`getPropertyValue(...), "Label"`): pass it
+        // through — the note author provided a finished column, so converter
+        // re-wrapping would double-quote the expression into a failing cell.
+        // Detection: expression head ends with `)` right before the label comma.
+        int labelMarker = jsText.lastIndexOf(", \"");
+        if (labelMarker > 0 && jsText.endsWith("\"")
+                && jsText.charAt(labelMarker + 3) != '"'
+                && jsText.substring(0, labelMarker).trim().endsWith(")")) {
+            return stripYamlQuotes(jsText);
+        }
 
         if ("filePath".equals(resolvedProperty)) {
             return LUA_FILE_PATH_VALUE_TEMPLATE;

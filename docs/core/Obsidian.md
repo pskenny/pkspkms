@@ -16,7 +16,9 @@ What PKSPKMS understands today:
 - **Bases blocks** — ` ```base ` and ` ```luabase ` blocks render as Markdown
   tables; the filter vocabulary follows Obsidian Bases expressions
   (contains/containsAny/containsAll, startsWith, inFolder, isEmpty, comparisons,
-  array equality, negation)
+  array equality, negation). Filter semantics: map entries AND-combine,
+  `and`/`or`/`not` keys (not = none-of: a row any of whose declared conditions
+  matches is excluded), structured leaves recurse as sub-filters
 - **Tab-indented YAML** — tolerated where Obsidian tolerates it
 
 Not yet shared with Obsidian:

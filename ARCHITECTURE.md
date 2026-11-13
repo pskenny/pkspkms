@@ -10,8 +10,9 @@ Bugs are tracked in [BUGS.md](BUGS.md).
 
 `SQLiteLuaConnector` lives in desktop, not core: it registers the `lua_eval` SQLite function via `org.sqlite.Function`, 
 and core declares `sqlite-jdbc` test-scoped so an Android app can consume core with its own driver (reference module: 
-`docs/android/`). Core accepts a `Consumer<Connection>` registrar instead — without one, Lua-backed Bases queries are 
-skipped. `TrayFactory` builds the tray on a worker thread with a 5-second timeout: tray initialization can block 
+`docs/android/`). Application passes a `null` registrar — after the Tier 4 collapse, embed rendering evaluates 
+filters in-process via `LuaBaseProcessor.processOverCorpus` and nothing composes SQL with `lua_eval`; the connector 
+is kept for ad-hoc SQL Lua queries and its desktop JNI-robustness test pins. `TrayFactory` builds the tray on a worker thread with a 5-second timeout: tray initialization can block 
 indefinitely (dorkbox desktop-detection subprocess), so a stalled tray degrades the app headless instead of hanging 
 startup. `io/fs` is the filesystem plumbing (disk, plus `SynthesizedFileSystem` for read-only in-memory vaults); 
 `io/feed` mounts OPML outlines and RSS/Atom/podcast feeds as virtual vaults — fetched once at server start, 
@@ -37,7 +38,8 @@ Application (CLI)
                                                  corpus single-pass: loadCorpus → processOverCorpus, one JSON parse per file per render pass)
 ```
 
-Everything touching SQLite is serial on a single JDBC connection (SQLite is single-writer, even in WAL). Only parse/hash runs in parallel — it has no shared mutable state. The DB is a disposable cache today: tables are dropped and recreated on every repository construction (BUGS.md B8), so every load is a full rescan. Embed rendering is global across vaults: vault mounts only seed EMBEDS rows, and `processEmbeds()` runs once after the full mount sequence so a luabase always filters over the complete corpus.
+Serial writes run on the shared JDBC connection (SQLite is single-writer, even in WAL); `SqliteEmbedProcessor` opens
+its own connection for the render pass. Only parse/hash runs in parallel — it has no shared mutable state. The DB schema is versioned (`META.schema_version`) and persists across constructions: legacy pre-versioning databases are adopted, unknown newer versions are rejected, and `--reset-db` is the explicit rebuild escape hatch — loads after a start diffuse to an incremental mtime-diff pass. Embed rendering is global across vaults: vault mounts only seed EMBEDS rows, and `processEmbeds()` runs once after the full mount sequence so a luabase always filters over the complete corpus. Per-row filter evaluation is partially coerced: `FilterAnalyzer` recognizes the converter-emitted filter grammar and `LuaBaseProcessor.processOverCorpus` then builds each row's Lua table with only the referenced properties (unrecognized filters keep full coercion — same engine, same semantics; measured ~3.8x on the filter phase for a 20-property corpus) — Tier 8 went further: the analyzer now also emits a typed AST (`FilterExpr`), recognized filters evaluate natively in Java (`FilterEval`, Lua-semantics differential-pinned, ~15x faster than luaj on the embed phase), and only unrecognized filters/user formulas touch Lua.
 
 ## Query language -> SQL
 
@@ -77,7 +79,11 @@ Full language spec: [docs/core/Querying.md](docs/core/Querying.md).
                startsWith/inFolder/isEmpty/containsAll/array equality/numeric
                comparisons)
                  └─ LuaBaseProcessor
-                      ├─ filter: lua_eval(?, properties) per SQLite row, or in-memory
+                      ├─ filter: recognized filters evaluate natively in Java
+                      │   (FilterEval over the analyzer's AST, ~15x the Lua cost
+                      │   on the embed phase, differential-pinned); unrecognized
+                      │   filters + user formulas stay on Lua (partial coercion);
+                      │   invalid filter → headers-only; single path since the collapse
                       ├─ sort: type-tolerant comparator (nulls last)
                       └─ render: Table or List (cards/map degrade to table)
 ```
@@ -99,8 +105,8 @@ the `YamlParser` (frontmatter) and converter paths.
 
 Virtual vault rows are prefixed `@alias/`.
 
-`/ping`, `/config`, `/files/list`, `/files/list/graph`, `/files/manifest`, `/cache/{address}/{location}`,
-`/webui/*`, `/openapi.json`. Binds 127.0.0.1 by default (`--bind` opt-out). Bearer-token auth on every
+`/ping`, `/files/list`, `/files/list/graph`, `/files/manifest`, `/cache/{address}/{location}`,
+`/mcp`, `/webui/*`, `/openapi.json`. Binds 127.0.0.1 by default (`--bind` opt-out). Bearer-token auth on every
 route except `/ping` and `/webui/*` (constant-time compare; a fresh SecureRandom token is generated
 at every start and written 0600 to `~/.config/pkspkms/token`). Host-header allow-list (DNS-rebinding
 defense); no CORS; `/cache` is POST-only. Webui responses carry CSP
@@ -110,10 +116,11 @@ defense); no CORS; `/cache` is POST-only. Webui responses carry CSP
 a piped thread; malformed queries return HTTP 400 with a JSON error body. Token bootstrap:
 `Application.resolveToken`.
 
-## Known layering violations (tracked in BUGS.md P3)
+## Known layering violations
 
-- `io/JsonUtil` imports `repo` — utility reaches up into the repository layer
-- `io.processor.markdown.YamlFrontmatterReader` depends on `luabase.YamlParser`
-- Services (`WikilinkService`/`WikilinkFinder`) hand-roll SQL against `FILES`; the repo leaks its raw `Connection`
-- Circular package dependency `repo <-> luabase`
-- `SqliteRepository.getConnection()` exposes the single shared connection
+None remaining. Fixed across the P3 sweep and the final layering pass:
+
+- `io/JsonUtil` no longer imports `repo` — the streaming writer lives in `repo/PksJsonWriter`; `io/JsonUtil` keeps only `mapToJson`
+- Frontmatter parsing's shared YAML utilities live in `io.YamlParser` (moved out of `luabase`) — `io` → `luabase` edge is gone, `luabase` → `io` is the single direction
+- The `repo <-> luabase` cycle is dissolved: `luabase` has zero `repo` imports (the collapse made the corpus a plain `List<PksFile>`), and the loader/repo layers talk to the SQL surface through `SqliteFiles`
+- Services no longer hand-roll SQL against `FILES` — the resolver probes the typed `SqliteFiles` surface; `SqliteRepository` no longer leaks a raw `Connection` (the concrete class keeps a deprecated accessor strictly as a test seam)

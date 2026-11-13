@@ -8,13 +8,20 @@
     <parent>
         <groupId>io.pskenny.pkspkms</groupId>
         <artifactId>pkspkms</artifactId>
-        <version>0.1.0</version>
+        <version>0.1.2</version>
     </parent>
 
     <artifactId>pkspkms-desktop</artifactId>
     <packaging>jar</packaging>
 
     <name>pkspkms-desktop</name>
+    <licenses>
+        <license>
+            <name>GNU General Public License, version 3 or later</name>
+            <url>https://www.gnu.org/licenses/gpl-3.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
     <description>Desktop launcher for PKSPKMS with CLI and optional system tray.</description>
 
     <dependencies>
