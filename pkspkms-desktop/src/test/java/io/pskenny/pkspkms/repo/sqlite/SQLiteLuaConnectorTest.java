@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@org.junit.jupiter.api.Tag("legacy")
 public class SQLiteLuaConnectorTest {
 
     @BeforeEach

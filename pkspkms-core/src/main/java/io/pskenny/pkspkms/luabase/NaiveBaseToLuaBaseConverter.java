@@ -6,6 +6,8 @@ import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
+import io.pskenny.pkspkms.io.YamlParser;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -502,6 +504,17 @@ public class NaiveBaseToLuaBaseConverter {
 
         String resolvedProperty = PropertyMapping.resolve(jsText);
         String maybeNegate = jsText.startsWith("!") || jsText.contains("!") ? " not " : "";
+
+        // Already a full Lua spec (`getPropertyValue(...), "Label"`): pass it
+        // through — the note author provided a finished column, so converter
+        // re-wrapping would double-quote the expression into a failing cell.
+        // Detection: expression head ends with `)` right before the label comma.
+        int labelMarker = jsText.lastIndexOf(", \"");
+        if (labelMarker > 0 && jsText.endsWith("\"")
+                && jsText.charAt(labelMarker + 3) != '"'
+                && jsText.substring(0, labelMarker).trim().endsWith(")")) {
+            return stripYamlQuotes(jsText);
+        }
 
         if ("filePath".equals(resolvedProperty)) {
             return LUA_FILE_PATH_VALUE_TEMPLATE;

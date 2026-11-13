@@ -443,4 +443,39 @@ public class QueryLanguageTest {
         assertEquals(List.of("$.\"price\"", 1.0, "$.\"price\"", 1.0, "$.\"price\"", 50.0, "$.\"price\"", 50.0),
                 q.params());
     }
+
+    // --- `modified`: the loader-stamped ISO mtime, queryable like any property ---
+
+    private final List<Row> modifiedFixture = List.of(
+            new Row("old.md", "{\"filePath\": \"old.md\", \"modified\": \"2026-10-01T09:00:00Z\"}"),
+            new Row("new.md", "{\"filePath\": \"new.md\", \"modified\": \"2026-11-01T00:00:00Z\"}"),
+            new Row("none.md", "{\"filePath\": \"none.md\"}"));
+
+    @Test
+    void modifiedRecencyRangeMatchesIsoLexically() throws SQLException {
+        // ISO strings compare lexically: recency narrowing is a plain text range
+        List<String> paths = execute(
+                compiler.compile(parser.parse("modified:[2026-11-01 TO *]")), modifiedFixture);
+        assertEquals(List.of("new.md"), paths);
+    }
+
+    @Test
+    void modifiedOpenLowerBound() throws SQLException {
+        // `TO 2026-11-01` is prefix-lexical: a midnight-instant string still
+        // sorts past the bare-date bound — pinned as documented behavior
+        List<String> paths = execute(
+                compiler.compile(parser.parse("modified:[* TO 2026-11-01]")), modifiedFixture);
+        assertEquals(List.of("old.md"), paths);
+    }
+
+    @Test
+    void modifiedExistsAndNotParity() throws SQLException {
+        List<String> exists = execute(
+                compiler.compile(parser.parse("modified:*")), modifiedFixture);
+        assertEquals(List.of("old.md", "new.md"), exists);
+
+        List<String> not = execute(
+                compiler.compile(parser.parse("not modified:*")), modifiedFixture);
+        assertEquals(List.of("none.md"), not);
+    }
 }

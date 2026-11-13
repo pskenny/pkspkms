@@ -1,11 +1,45 @@
 {
-  "resultSize" : 2,
-  "files" : [ {
-    "links" : [ "test2.svg", "test1.md" ],
-    "tags" : "test",
-    "filePath" : "test.md"
-  }, {
-    "tags" : "test",
-    "filePath" : "test2.md"
-  } ]
+   "resultSize": 2,
+   "files": [
+      {
+         "links": [
+            "test2.svg",
+            "test1.md"
+         ],
+         "tags": "test",
+         "filePath": "test.md",
+         "outline": [
+            {
+               "text": "This is the body content for: test.md",
+               "level": 1
+            }
+         ],
+         "linkSpans": [
+            {
+               "kind": "image",
+               "target": "test2.svg",
+               "offset": 80,
+               "line": 7
+            },
+            {
+               "kind": "link",
+               "target": "test1.md",
+               "offset": 100,
+               "line": 8
+            }
+         ],
+         "modified": "2025-01-01T00:00:00Z"
+      },
+      {
+         "tags": "test",
+         "filePath": "test2.md",
+         "outline": [
+            {
+               "text": "This is the body content for: test2.md",
+               "level": 1
+            }
+         ],
+         "modified": "2025-01-01T00:00:00Z"
+      }
+   ]
 }

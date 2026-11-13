@@ -53,7 +53,7 @@ public class JavaFileSystem implements PkmsFileSystem {
         File file = fileFor(relativePath).getCanonicalFile();
         String rootCanonical = root.getCanonicalPath();
         String fileCanonical = file.getCanonicalPath();
-        if (!fileCanonical.startsWith(rootCanonical)) {
+        if (!fileCanonical.startsWith(rootCanonical + File.separator)) {
             throw new IOException("File " + fileCanonical + " is not under " + rootCanonical);
         }
         return new JavaFilePkmsEntry(root, file);
@@ -117,6 +117,8 @@ public class JavaFileSystem implements PkmsFileSystem {
         }
     }
 
+
+
     private void walkFiles(File dir, List<String> excluded, List<PkmsEntry> result, Set<String> seen) throws IOException {
         File[] children = dir.listFiles();
         if (children == null) return;
@@ -148,7 +150,9 @@ public class JavaFileSystem implements PkmsFileSystem {
     private static String getRelativePath(File root, File file) throws IOException {
         String rootCanonical = root.getCanonicalPath();
         String fileCanonical = file.getCanonicalPath();
-        if (!fileCanonical.startsWith(rootCanonical)) {
+        // Separator-aware containment (BUGS.md 11): a sibling root path must
+        // fail loudly instead of bleeding its directory name into the result
+        if (!fileCanonical.startsWith(rootCanonical + File.separator)) {
             throw new IOException("File " + fileCanonical + " is not under " + rootCanonical);
         }
         return fileCanonical.substring(rootCanonical.length() + 1)

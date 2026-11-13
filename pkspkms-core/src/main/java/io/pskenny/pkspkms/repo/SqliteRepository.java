@@ -1,15 +1,18 @@
 package io.pskenny.pkspkms.repo;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.pskenny.pkspkms.io.PksFile;
+import io.pskenny.pkspkms.repo.sqlite.SqliteFiles;
 
-import java.sql.Connection;
-import java.sql.SQLException;
-import java.util.List;
-
+/**
+ * Repository-level contract. The raw connection stays private to the
+ * {@link FilesDao} — this interface and its implementers never hand one out
+ * (BUGS.md P3: the old `getConnection()` leak). Test suites that need direct
+ * SQL use `SQLitePksFileRepository`'s concrete `@Deprecated` connection
+ * accessor, not this interface.
+ */
 public interface SqliteRepository extends PksFileRepository {
-    Connection getConnection();
     ObjectMapper getJsonMapper();
-    void setLinks(int sourceFileId, List<String> targetFilePaths, String linkType) throws SQLException;
-    void addEmbedsToTable(int fileId, PksFile pksFile, String key, String type) throws SQLException;
+
+    /** Typed SQL surface for the FILES row graph. */
+    SqliteFiles files();
 }

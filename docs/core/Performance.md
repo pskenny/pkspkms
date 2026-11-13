@@ -2,16 +2,17 @@
 title: Performance
 ---
 
-**Application-level benchmarks** (test through `Application.java` — full CLI entry point):
+> [!NOTE] No benchmark suite is checked in today. The `EndToEndAppBenchmark`
+> class this page references no longer exists in the repo; the numbers below
+> are the last recorded output (2026-09-06) and the methodology is preserved
+> for re-implementing the suite.
 
-```shell
-# Export + server startup through the actual Application constructor
-mvn test -pl pkspkms-desktop -am -Dtest=EndToEndAppBenchmark -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true
-```
+The suite previously ran through the full CLI entry point (`Application.java`) as
+`mvn test -pl pkspkms-desktop -am -Dtest=EndToEndAppBenchmark` (the `-am` flag
+built `pkspkms-core` first). Re-adding means recreating that class in
+`pkspkms-desktop`'s test tree.
 
-The `-am` flag is needed to build the `pkspkms-core` dependency first. `-Dsurefire.failIfNoSpecifiedTests=false` prevents the core module from erroring when it can't find the benchmark class.
-
-The benchmark suite:
+It measured:
 
 - **Startup & load benchmarks** — scan, parse and index a vault into SQLite,
   measured through the full CLI entry point. Active datasets:
@@ -35,8 +36,8 @@ The benchmark suite:
   resolution, embed expansion) using `Export.export()` in dry-run mode to
   isolate processing time from disk I/O
 
-Each benchmark runs 3 warmup iterations (discarded) then 10 measured iterations.
-Query and export benchmarks run against an empty CLI start, so they measure
+Each benchmark ran 3 warmup iterations (discarded) then 10 measured iterations.
+Query and export benchmarks ran against an empty CLI start, so they measure
 steady-state work, not vault load.
 
 Example output (2026-09-06, after parallel loading and the query-language rewrite):

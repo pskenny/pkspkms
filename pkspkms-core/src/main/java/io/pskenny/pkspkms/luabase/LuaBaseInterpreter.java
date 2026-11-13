@@ -14,12 +14,35 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+/**
+ * Sandbox session for note-controlled Lua (base/luabase filter + order-column
+ * expressions, user formulas). Each instance is a SELF-CONTAINED disposable
+ * environment: globals, compile caches and user formulas all live and die with
+ * the session. Construct one per render pass — instances are NOT thread-safe
+ * and must never be shared across notes (a note could otherwise poison the
+ * trusted helpers used by the next note).
+ *
+ * Environment policy is an ALLOWLIST (BUGS.md S1-S3): only the standard
+ * comparison base functions ({@code type}, {@code tostring}, {@code tonumber}),
+ * the {@code string}/{@code table}/{@code math} libraries and the trusted
+ * helpers of {@code /luabase/functions.lua} exist. {@code PackageLib} IS
+ * installed but only as install-time plumbing — stock luaj libraries resolve
+ * {@code package.loaded} during their constructors — and the {@code package}
+ * global is swept away immediately after: its {@code package.searchers[3]}
+ * ({@code Class.forName} + {@code newInstance()} on any classpath LuaValue
+ * class, which can re-arm {@code os}/{@code luajava}) and {@code searchpath}
+ * become unreachable. Filesystem primitives ({@code loadfile}), {@code print},
+ * a live {@code _G}, and the legacy deny list ({@code os}, {@code io},
+ * {@code luajava}, {@code load}, {@code loadstring}, {@code dofile},
+ * {@code require}) are all denied by the same sweep.
+ */
 public final class LuaBaseInterpreter {
 
     // Generous ceiling on note-controlled filters: the cheapest CPU-DoS guard
-    // (a full watchdog is deferred; see SECURITY HARDENING 1 residual notes)
-    private static final int MAX_EXPRESSION_LENGTH = 4096;
+    // (a full watchdog is deferred; see docs/core/Security.md residual notes)
+    static final int MAX_EXPRESSION_LENGTH = 4096;
 
     private static final String FUNCTIONS_LUA;
     static {
@@ -33,79 +56,127 @@ public final class LuaBaseInterpreter {
         }
     }
 
-    private final ThreadLocal<ThreadState> threadState = ThreadLocal.withInitial(ThreadState::new);
+    // Base-library functions the filter grammar and user formulas may reach.
+    // Everything else BaseLib installs (print, pcall, select, pairs, rawset,
+    // setfenv, loadfile, dofile, load, ...) is removed right after install.
+    private static final Set<String> KEPT_GLOBALS = Set.of(
+            "type", "tostring", "tonumber",
+            "string", "table", "math");
 
-    // Compile caches are LRU-bounded: eviction just recompiles on next use
-    // (P3: these were unbounded per-thread before)
-    private static final int COMPILE_CACHE_CAP = 512;
+    // functions.lua exports (local helpers listHas/compareNumeric need no entry).
+    private static final Set<String> FUNCTIONS_LUA_EXPORTS = Set.of(
+            "hasProperty", "hasPropertyValue", "hasPropertyContaining",
+            "hasPropertyValueIn", "getPropertyValue",
+            "hasPropertyValueGreaterThan", "hasPropertyValueGreaterThanOrEqual",
+            "hasPropertyValueLessThan", "hasPropertyValueLessThanOrEqual",
+            "fileField", "fileFieldStartsWith", "hasPropertyValueStartsWith",
+            "fileInFolder", "hasEmptyProperty", "hasPropertyContainingAll");
 
-    private static class ThreadState {
-        final Globals globals;
-        final Map<String, LuaValue> compiledExpressions = lruCache();
-        final Map<String, LuaValue> compiledLuaExpressions = lruCache();
-
-        ThreadState() {
-            // Allow-list environment: only what functions.lua and the generated
-            // filters need. Note-controlled Lua must never reach the OS, the
-            // filesystem, or Java reflection.
-            this.globals = new Globals();
-            this.globals.load(new JseBaseLib());
-            this.globals.load(new PackageLib());
-            this.globals.load(new StringLib());
-            this.globals.load(new TableLib());
-            this.globals.load(new JseMathLib());
-            // The Lua compiler is required to compile our trusted wrappers and
-            // functions.lua — the `load` global itself is denied below, so
-            // note-controlled code still cannot compile new chunks
-            org.luaj.vm2.compiler.LuaC.install(this.globals);
-
-            LuaValue nil = LuaValue.NIL;
-            this.globals.set("os", nil);
-            this.globals.set("io", nil);
-            this.globals.set("luajava", nil);
-            this.globals.set("load", nil);
-            this.globals.set("loadstring", nil);
-            this.globals.set("dofile", nil);
-            this.globals.set("require", nil);
-
-            this.globals.load(FUNCTIONS_LUA).call();
-        }
-    }
+    private final Globals globals;
+    private final Map<String, LuaValue> compiledExpressions = lruCache();
+    private final Map<String, LuaValue> compiledLuaExpressions = lruCache();
 
     private static Map<String, LuaValue> lruCache() {
+        int cap = 512;
         return java.util.Collections.synchronizedMap(
-                new java.util.LinkedHashMap<>(COMPILE_CACHE_CAP, 0.75f, true) {
+                new java.util.LinkedHashMap<String, LuaValue>(cap, 0.75f, true) {
                     @Override
                     protected boolean removeEldestEntry(java.util.Map.Entry<String, LuaValue> eldest) {
-                        return size() > COMPILE_CACHE_CAP;
+                        return size() > cap;
                     }
                 });
     }
 
+    public LuaBaseInterpreter() {
+        Globals g = new Globals();
+        g.load(new JseBaseLib());
+        g.load(new PackageLib());
+        g.load(new StringLib());
+        g.load(new TableLib());
+        g.load(new JseMathLib());
+        // The Lua compiler is required to compile note expressions and the
+        // trusted wrappers; no `load/loadstring` global exists so note code
+        // still cannot compile new chunks itself.
+        org.luaj.vm2.compiler.LuaC.install(g);
+
+        // Trusted helpers first: they compile against the full-but-soon-thinned
+        // env, then the allowlist sweep strips what they must not reach. Their
+        // definitions themselves stay (they are in FUNCTIONS_LUA_EXPORTS).
+        g.load(FUNCTIONS_LUA).call();
+
+        // ALLOWLIST SWEEP: nil every global not on the keep list. This removes
+        // `package` (S1: an installed-only plumbing table whose searchers
+        // re-arm os/luajava), `loadfile` (S2), `print`, `assert`, `pcall`,
+        // `pairs`, `select`, `rawset`, `setfenv`... — the legacy deny list
+        // (os, io, luajava, load, loadstring, dofile, require) is denied by
+        // the same sweep.
+        for (Map.Entry<String, LuaValue> entry : Map.copyOf(toJavaMap(g)).entrySet()) {
+            String name = entry.getKey();
+            if (!name.equals("_G") && !KEPT_GLOBALS.contains(name)
+                    && !FUNCTIONS_LUA_EXPORTS.contains(name)) {
+                g.set(name, LuaValue.NIL);
+            }
+        }
+
+        // Frozen `_G` snapshot (S3 backstop): note code assigning
+        // `_G.hasProperty = ...` writes into the COPY, never the live env.
+        LuaTable snapshot = new LuaTable();
+        for (Map.Entry<String, LuaValue> entry : toJavaMap(g).entrySet()) {
+            if (!"_G".equals(entry.getKey())) {
+                snapshot.set(entry.getKey(), entry.getValue());
+            }
+        }
+        g.set("_G", snapshot);
+
+        this.globals = g;
+    }
+
+    // Globals and LuaTable both are LuaTables; entrySet gives the flat view.
+    private static Map<String, LuaValue> toJavaMap(LuaTable table) {
+        java.util.Map<String, LuaValue> out = new java.util.LinkedHashMap<>();
+        LuaValue k = LuaValue.NIL;
+        while (true) {
+            var next = table.next(k);
+            if (next.isnil(1)) {
+                break;
+            }
+            k = next.arg1();
+            LuaValue v = next.arg(2);
+            out.put(k.tojstring(), v);
+        }
+        return out;
+    }
+
     public boolean evaluateExpression(String expression, Map<String, Object> properties) {
+        return evaluateExpression(expression, properties, null);
+    }
+
+    // referencedProperties limits the per-row Lua table to the keys the filter
+    // provably reads (FilterAnalyzer result); null coerces every property.
+    // Only a proven subset may pass here — a key the filter actually reads but
+    // that is missing from the set would read as nil and change results.
+    public boolean evaluateExpression(String expression, Map<String, Object> properties, Set<String> referencedProperties) {
         checkExpressionLength(expression);
-        ThreadState ts = threadState.get();
-        LuaValue chunk = ts.compiledExpressions.computeIfAbsent(expression, expr -> {
+        LuaValue chunk = compiledExpressions.computeIfAbsent(expression, expr -> {
             String script = "local file = ...; return (" + expr + ")";
-            return ts.globals.load(script);
+            return globals.load(script);
         });
 
-        LuaValue luaFile = coerceFile(properties);
+        LuaValue luaFile = coerceFile(properties, referencedProperties);
         return chunk.call(luaFile).toboolean();
     }
 
     public void addFunction(String name, String function) {
-        ThreadState ts = threadState.get();
         String script = "function " + name + "(file) " + function + " end";
-        ts.globals.load(script).call();
+        compiledLuaExpressions.clear();
+        globals.load(script).call();
     }
 
     public LuaValue evaluateLuaExpression(String expression, Map<String, Object> file) {
         checkExpressionLength(expression);
-        ThreadState ts = threadState.get();
-        LuaValue function = ts.compiledLuaExpressions.computeIfAbsent(expression, expr -> {
+        LuaValue function = compiledLuaExpressions.computeIfAbsent(expression, expr -> {
             String script = "return function(file) return " + expr + " end";
-            LuaValue functionChunk = ts.globals.load(script);
+            LuaValue functionChunk = globals.load(script);
             return functionChunk.call();
         });
 
@@ -121,23 +192,45 @@ public final class LuaBaseInterpreter {
 
     public void validateExpression(String expression) {
         checkExpressionLength(expression);
-        ThreadState ts = threadState.get();
         String script = "local file = ...; return (" + expression + ")";
-        ts.globals.load(script);
+        globals.load(script);
     }
 
-    // Pure-Lua value coercion: the sandbox denies luajava, so Java-object
-    // method dispatch (file:get, list:contains) is unavailable. The file is
-    // a Lua table; functions.lua indexes it directly.
-    private static LuaValue coerceFile(Map<String, Object> properties) {
+    // Pure-Lua value coercion: no luajava exists in the sandbox, so Java-object
+    // method dispatch is unavailable. The file is a Lua table; functions.lua
+    // indexes it directly.
+    //
+    // referencedProperties == null coerces the whole map; a non-null set coerces
+    // only those keys (partial coercion for recognized filters). Missing or
+    // nil-valued keys are skipped in both modes, so a trimmed table is
+    // indistinguishable from the full one to a filter that only reads the
+    // referenced keys.
+    private static LuaValue coerceFile(Map<String, Object> properties, Set<String> referencedProperties) {
         LuaTable table = new LuaTable();
-        for (Map.Entry<String, Object> entry : properties.entrySet()) {
-            LuaValue value = coerceValue(entry.getValue());
-            if (value != LuaValue.NIL) {
-                table.set(entry.getKey(), value);
+        if (referencedProperties == null) {
+            for (Map.Entry<String, Object> entry : properties.entrySet()) {
+                putCoerced(table, entry.getKey(), entry.getValue());
             }
+            return table;
+        }
+        for (String key : referencedProperties) {
+            putCoerced(table, key, properties.get(key));
         }
         return table;
+    }
+
+    private static LuaValue coerceFile(Map<String, Object> properties) {
+        return coerceFile(properties, null);
+    }
+
+    private static void putCoerced(LuaTable table, String key, Object value) {
+        if (value == null) {
+            return;
+        }
+        LuaValue coerced = coerceValue(value);
+        if (coerced != LuaValue.NIL) {
+            table.set(key, coerced);
+        }
     }
 
     private static LuaValue coerceValue(Object value) {

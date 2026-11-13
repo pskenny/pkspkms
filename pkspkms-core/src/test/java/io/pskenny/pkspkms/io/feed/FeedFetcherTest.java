@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -34,6 +35,8 @@ public class FeedFetcherTest {
         // Harness servers run on loopback: allow it; SSRF tests tighten the
         // guard per test
         FeedFetcher.hostGuard = host -> true;
+        // Post-read pin passes for harness requests; dedicated tests re-tighten
+        FeedFetcher.resolutionPin = (host, validated) -> true;
         // Deterministic fake time: the sleeper advances the clock instead of
         // blocking, so throttle spacing and retry delays assert exactly
         FeedFetcher.clockNanos = () -> fakeNanos.get();
@@ -47,6 +50,8 @@ public class FeedFetcherTest {
     void restoreSeams() {
         FeedFetcher.resetThrottles();
         FeedFetcher.hostGuard = FeedFetcher::isPublicHost;
+        FeedFetcher.resolutionPin = FeedFetcher::resolutionMatches;
+        FeedFetcher.resolver = FeedFetcher::defaultResolver;
         FeedFetcher.sleeper = FeedFetcher::sleepMs;
         FeedFetcher.clockNanos = System::nanoTime;
     }
@@ -56,6 +61,31 @@ public class FeedFetcherTest {
         // SSRF/LFI guard: feed sources must be http(s) — never local paths (B22)
         IOException e = assertThrows(IOException.class, () -> FeedFetcher.load("/home/pk/.config/pkspkms/token"));
         assertTrue(e.getMessage().contains("non-http"), "message names the policy: " + e.getMessage());
+    }
+
+    // --- H5: RRset-level policy + post-read pin ---
+
+    private static java.net.InetAddress addr(byte... bytes) {
+        try {
+            return java.net.InetAddress.getByAddress(bytes);
+        } catch (java.net.UnknownHostException e) {
+            // getByAddress throws only on a null/wrong non-4/non-16 length;
+            // every call site passes a valid literal
+            return java.net.InetAddress.getLoopbackAddress();
+        }
+    }
+
+    @Test
+    void addressClassificationCoversCgnatAndBenchmarking() throws Exception {
+        assertFalse(FeedFetcher.isPublicAddress(addr(new byte[]{100, 64, 1, 1})), "100.64/10 CGNAT refused");
+        assertFalse(FeedFetcher.isPublicAddress(addr(new byte[]{100, (byte) 127, (byte) 255, (byte) 254})), "100.127 refused");
+        assertFalse(FeedFetcher.isPublicAddress(addr(new byte[]{(byte) 198, 18, 0, 1})), "198.18/15 benchmarking refused");
+        assertFalse(FeedFetcher.isPublicAddress(addr(new byte[]{(byte) 198, 19, (byte) 255, 1})), "198.19 refused");
+        assertFalse(FeedFetcher.isPublicAddress(addr(new byte[]{127, 0, 0, 1})), "loopback refused");
+        assertFalse(FeedFetcher.isPublicAddress(addr(new byte[]{(byte) 192, (byte) 168, 1, 1})), "RFC1918 refused");
+        assertTrue(FeedFetcher.isPublicAddress(addr(new byte[]{8, 8, 8, 8})), "public unicast allowed");
+        assertTrue(FeedFetcher.isPublicAddress(addr(new byte[]{100, 0, 0, 1})), "100.0 is NOT CGNAT space");
+        assertTrue(FeedFetcher.isPublicAddress(addr(new byte[]{(byte) 198, 16, 5, 5})), "198.16 is not benchmarking");
     }
 
     @Test
@@ -234,6 +264,36 @@ public class FeedFetcherTest {
         @Override
         public void close() {
             server.stop(0);
+        }
+    }
+
+    @Test
+    void rrsetWithPrivateMemberIsRefused() {
+        // H5: one good-looking answer must not mask a private one — the guard
+        // rejects a host whose ANY resolvable address is private. The
+        // resolver seam avoids touching real DNS.
+        FeedFetcher.hostGuard = FeedFetcher::isPublicHost;
+        FeedFetcher.resolver = host -> switch (host) {
+            case "mixed.example" -> new java.net.InetAddress[]{
+                    addr(new byte[]{8, 8, 8, 8}), addr(new byte[]{(byte) 192, (byte) 168, 0, 9})};
+            default -> new java.net.InetAddress[]{};
+        };
+        Exception e = assertThrows(IOException.class,
+                () -> FeedFetcher.httpGet("http://mixed.example/feed.xml"));
+        assertTrue(e.getMessage().contains("refused"), e.getMessage());
+    }
+
+    @Test
+    void midFetchResolutionMoveDiscardsTheBody() throws Exception {
+        // H5: a rebinder presents a public answer at check time and a
+        // private one at read time — the bytes were read, but the body lands
+        // in nothing when the RRset moved.
+        try (HttpServerHarness harness = new HttpServerHarness()) {
+            harness.serveStatic("/feed", 200, BODY);
+            FeedFetcher.resolutionPin = (host, validated) -> false; // answer changed
+            Exception e = assertThrows(IOException.class,
+                    () -> FeedFetcher.httpGet("http://localhost:" + harness.port() + "/feed"));
+            assertTrue(e.getMessage().contains("resolution changed"), e.getMessage());
         }
     }
 }

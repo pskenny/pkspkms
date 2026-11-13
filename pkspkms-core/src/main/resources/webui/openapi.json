@@ -134,7 +134,7 @@
           "vault"
         ],
         "summary": "Copy a file from a virtual vault into the cache directory",
-        "description": "Copies {location} from the virtual vault registered under {address} into {directory}, hashed with BLAKE3, and inserts the cached file into the index. Intended for the planned Obsidian plugin. POST only \u2014 drive-by GETs cannot mutate the vault.",
+        "description": "Copies {location} from the virtual vault registered under {address} into {directory}, hashed with BLAKE3, and inserts the cached file into the index. Intended for the planned Obsidian plugin. POST only \u2014 drive-by GETs cannot mutate the vault. POSTs also require the header X-Pkspkms-Cache-Request: 1 (blocks cross-site form-POST drive-bys; non-browser clients just send it), and {address} must be a registered virtual-vault alias.",
         "operationId": "cacheFile",
         "parameters": [
           {
@@ -163,6 +163,18 @@
               "type": "string"
             },
             "description": "Directory to cache the copy into. Relative paths resolve under the vault (recommended: .pkspkms-cache); absolute paths are honoured when inside the vault and rejected otherwise."
+          },
+          {
+            "name": "X-Pkspkms-Cache-Request",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            },
+            "description": "Anti-drive-by marker; the constant \"1\""
           }
         ],
         "responses": {
@@ -205,6 +217,34 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/mcp": {
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "Model Context Protocol endpoint",
+        "description": "Single MCP endpoint (streamable HTTP): one JSON-RPC 2.0 request or notification per POST. Requests answer with a single JSON-RPC response object (no SSE stream); notifications answer 202 Accepted with no body. Exposes the search, read_file, graph, manifest and resolve_wikilink tools over the vault. GET answers 405.",
+        "operationId": "mcp",
+        "responses": {
+          "200": {
+            "description": "JSON-RPC 2.0 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Notification accepted (no body)"
+          },
+          "405": {
+            "description": "Only POST is supported"
           }
         }
       }

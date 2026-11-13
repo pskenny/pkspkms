@@ -6,12 +6,15 @@ import io.pskenny.pkspkms.io.fs.ObsidianIgnores;
 import io.pskenny.pkspkms.io.fs.PkmsEntry;
 import io.pskenny.pkspkms.io.fs.PkmsFileSystem;
 import io.pskenny.pkspkms.io.processor.Processors;
+import io.pskenny.pkspkms.repo.SqliteRepository;
+import io.pskenny.pkspkms.repo.sqlite.SqliteFiles;
 
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -21,12 +24,14 @@ import java.util.function.Predicate;
 
 public final class RepositoryFileLoader {
     private final SqliteRepository repository;
+    private final SqliteFiles files;
     private final PkmsFileSystem fs;
     private final Processors processors;
     private final String alias;
 
     public RepositoryFileLoader(SqliteRepository repository, PkmsFileSystem fs, String alias) {
         this.repository = repository;
+        this.files = repository.files();
         this.fs = fs;
         this.processors = new Processors();
         this.alias = alias;
@@ -55,18 +60,7 @@ public final class RepositoryFileLoader {
         logger.debug("Walked {} files (excluding: {} + userIgnoreFilters)", diskEntries.size(), ALWAYS_EXCLUDED);
 
         // 2. Load all existing file paths and their last modified times from the database
-        java.util.Map<String, Long> dbModifiedTimes = new java.util.HashMap<>();
-        String querySql = "SELECT file_path, file_last_modified FROM FILES";
-        try (java.sql.Statement stmt = repository.getConnection().createStatement();
-             java.sql.ResultSet rs = stmt.executeQuery(querySql)) {
-            while (rs.next()) {
-                String path = rs.getString("file_path");
-                long mtime = rs.getLong("file_last_modified");
-                if (path != null) {
-                    dbModifiedTimes.put(path, mtime);
-                }
-            }
-        }
+        java.util.Map<String, Long> dbModifiedTimes = files.modifiedTimes();
 
         // 3. Determine new/modified files to parse, and active paths in current vault
         String prefix = (alias != null && !alias.isEmpty()) ? "@" + alias + "/" : "";
@@ -93,51 +87,20 @@ public final class RepositoryFileLoader {
                     ? dbPath.startsWith(prefix)
                     : !dbPath.startsWith("@");
 
-            if (belongsToCurrentVault && !activeDbPaths.contains(dbPath)) {
+            // Always-excluded cache rows (BUGS.md H1): the walk can never see
+            // `.pkspkms-cache`/`pkspkms-cache`, so their absence from
+            // activeDbPaths says nothing — delete-by-absence used to wipe
+            // every `/cache`-upserted FILES row on every reload. Rows cached
+            // into walked directories keep matching disk files anyway.
+            if (belongsToCurrentVault && !activeDbPaths.contains(dbPath)
+                    && !isInAlwaysExcludedDir(dbPath)) {
                 deletedDbPaths.add(dbPath);
             }
         }
 
         if (!deletedDbPaths.isEmpty()) {
-            Connection conn = repository.getConnection();
-            conn.setAutoCommit(false);
-            String delEmbeds = "DELETE FROM EMBEDS WHERE file_id IN (SELECT id FROM FILES WHERE file_path = ?)";
-            String delLinksSrc = "DELETE FROM LINKS WHERE source_file_id IN (SELECT id FROM FILES WHERE file_path = ?)";
-            String delLinksTgt = "DELETE FROM LINKS WHERE target_file_id IN (SELECT id FROM FILES WHERE file_path = ?)";
-            String delFile = "DELETE FROM FILES WHERE file_path = ?";
-
-            try (java.sql.PreparedStatement psEmbeds = conn.prepareStatement(delEmbeds);
-                 java.sql.PreparedStatement psLinksSrc = conn.prepareStatement(delLinksSrc);
-                 java.sql.PreparedStatement psLinksTgt = conn.prepareStatement(delLinksTgt);
-                 java.sql.PreparedStatement psFile = conn.prepareStatement(delFile)) {
-
-                for (String path : deletedDbPaths) {
-                    psEmbeds.setString(1, path);
-                    psEmbeds.addBatch();
-
-                    psLinksSrc.setString(1, path);
-                    psLinksSrc.addBatch();
-
-                    psLinksTgt.setString(1, path);
-                    psLinksTgt.addBatch();
-
-                    psFile.setString(1, path);
-                    psFile.addBatch();
-                }
-
-                psEmbeds.executeBatch();
-                psLinksSrc.executeBatch();
-                psLinksTgt.executeBatch();
-                psFile.executeBatch();
-
-                conn.commit();
-                logger.info("Removed {} deleted files from database", deletedDbPaths.size());
-            } catch (SQLException e) {
-                conn.rollback();
-                throw e;
-            } finally {
-                conn.setAutoCommit(true);
-            }
+            files.deleteFilesWithEdges(deletedDbPaths);
+            logger.info("Removed {} deleted files from database", deletedDbPaths.size());
         }
 
         logger.info("{} new/modified, {} unchanged, {} deleted",
@@ -187,227 +150,123 @@ public final class RepositoryFileLoader {
         }
 
         insertFiles(pksFiles, alias);
-        resolveWikilinks(pksFiles);
+        resolveWikilinks(pksFiles, alias);
         updatePropertiesAndLinks(pksFiles, alias);
     }
 
+    private static boolean isInAlwaysExcludedDir(String path) {
+        for (String segment : path.split("/")) {
+            if (ALWAYS_EXCLUDED.contains(segment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void insertFiles(List<PksFile> pksFiles, String alias) throws SQLException {
-        Connection initConn = repository.getConnection();
-        initConn.setAutoCommit(false);
-        String upsertSql = "INSERT OR IGNORE INTO FILES (file_path, file_name, file_name_ext, vault_alias_id, blake3) VALUES (?, ?, ?, ?, ?)";
-        try (java.sql.PreparedStatement pstmt = initConn.prepareStatement(upsertSql)) {
-            Integer vaultAliasId = null;
-            if (alias != null && !alias.isEmpty()) {
-                vaultAliasId = getVaultAliasId(alias);
-            }
-
-            for (PksFile file : pksFiles) {
-                String filePath = file.getFilePath();
-                if (filePath == null) continue;
-
-                // Derive file name and extension
-                String fileNameExt = filePath;
-                int lastSlash = filePath.lastIndexOf('/');
-                if (lastSlash != -1) {
-                    fileNameExt = filePath.substring(lastSlash + 1);
-                }
-                String fileName = fileNameExt;
-                int lastDot = fileNameExt.lastIndexOf('.');
-                if (lastDot != -1) {
-                    fileName = fileNameExt.substring(0, lastDot);
-                }
-
-                pstmt.setString(1, filePath);
-                pstmt.setString(2, fileName);
-                pstmt.setString(3, fileNameExt);
-
-                if (vaultAliasId != null) {
-                    pstmt.setInt(4, vaultAliasId);
-                } else {
-                    pstmt.setNull(4, java.sql.Types.INTEGER);
-                }
-
-                String hash = file.getHash();
-                if (hash != null) {
-                    pstmt.setString(5, hash);
-                } else {
-                    pstmt.setNull(5, java.sql.Types.VARCHAR);
-                }
-
-                pstmt.addBatch();
-            }
-            pstmt.executeBatch();
-            initConn.commit();
-        } catch (SQLException e) {
-            initConn.rollback();
-            throw e;
-        } finally {
-            initConn.setAutoCommit(true);
+        Integer vaultAliasId = null;
+        if (alias != null && !alias.isEmpty()) {
+            vaultAliasId = files.aliasId(alias);
         }
+        files.insertFiles(pksFiles, vaultAliasId);
     }
 
-    private Integer getVaultAliasId(String alias) throws SQLException {
-        // TODO hit a cache
-        String sql = "SELECT id FROM VAULT_ALIASES WHERE alias = ?";
-        try (java.sql.PreparedStatement pstmt = repository.getConnection().prepareStatement(sql)) {
-            pstmt.setString(1, alias);
-            try (java.sql.ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getInt("id");
-                }
-            }
-        }
-        return null;
+    private void resolveWikilinks(List<PksFile> pksFiles, String alias) throws SQLException {
+        // Vault-scoped lookups (BUGS.md B6): alias-null rows for the main
+        // vault, the alias's rows for a virtual vault — cross-vault name
+        // collisions can never leak into load-time resolution. The merge +
+        // resolution + dangler logic is pure and lives in LinkPlanner.
+        var nameIndex = files.nameIndex(alias);
+        LinkPlanner.plan(pksFiles, nameIndex);
     }
 
-    private void resolveWikilinks(List<PksFile> pksFiles) throws SQLException {
-        java.util.Map<String, String> filePathMap = new java.util.HashMap<>();
-        java.util.Map<String, String> fileNameExtMap = new java.util.HashMap<>();
-        java.util.Map<String, String> fileNameMap = new java.util.HashMap<>();
-
-        // A. Populate from already-existing files in the database in a single roundtrip
-        String sql = "SELECT file_path, file_name_ext, file_name FROM FILES";
-        try (java.sql.Statement stmt = repository.getConnection().createStatement();
-             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
-            while (rs.next()) {
-                String path = rs.getString("file_path");
-                String ext = rs.getString("file_name_ext");
-                String name = rs.getString("file_name");
-                if (path != null) filePathMap.put(path, path);
-                if (ext != null) fileNameExtMap.put(ext, path);
-                if (name != null) fileNameMap.put(name, path);
-            }
+    // Interim attribution lists: distinct, and for virtual vaults prefix any
+    // link that is not already alias-led (bare names and subfolder paths both
+    // belong inside @alias/ — the old contains('/') heuristic left subfoldered
+    // markdown links broken (B6 family)).
+    private static List<String> distinctPrefixed(List<String> source, String alias) {
+        List<String> distinct = source.stream().filter(Objects::nonNull).distinct().toList();
+        if (alias == null || alias.isEmpty()) {
+            return distinct;
         }
-
-        // B. Merge with newly parsed files in memory
-        for (PksFile file : pksFiles) {
-            String path = file.getFilePath();
-            if (path == null) continue;
-
-            String nameExt = path;
-            int lastSlash = path.lastIndexOf('/');
-            if (lastSlash != -1) {
-                nameExt = path.substring(lastSlash + 1);
-            }
-            String name = nameExt;
-            int lastDot = nameExt.lastIndexOf('.');
-            if (lastDot != -1) {
-                name = nameExt.substring(0, lastDot);
-            }
-
-            filePathMap.put(path, path);
-            fileNameExtMap.put(nameExt, path);
-            fileNameMap.put(name, path);
-        }
-
-        // C. Perform lightning-fast in-memory resolutions
-        for (PksFile pksFile : pksFiles) {
-            List<String> resolved = new java.util.ArrayList<>();
-            for (Object obj : pksFile.getAsList("wikilinks")) {
-                if (obj == null) continue;
-                String wikilink = obj.toString();
-                String cleanLink = wikilink.split("\\|")[0]   // drop display alias
-                        .split("#")[0]                        // drop heading/block ref
-                        .replace("[[", "")
-                        .replace("]]", "");
-
-                String target = filePathMap.get(cleanLink);
-                if (target == null) target = fileNameExtMap.get(cleanLink);
-                if (target == null) target = fileNameMap.get(cleanLink);
-
-                if (target != null) {
-                    resolved.add(target);
-                }
-            }
-
-            List<String> distinctResolved = resolved.stream()
-                    .filter(Objects::nonNull)
-                    .distinct()
-                    .toList();
-            if (distinctResolved.isEmpty()) {
-                continue;
-            }
-            pksFile.addToProperty("links", distinctResolved);
-        }
+        String prefix = "@" + alias + "/";
+        return distinct.stream().map(link -> link.startsWith("@") ? link : prefix + link).toList();
     }
 
     private void updatePropertiesAndLinks(List<PksFile> pksFiles, String alias) throws SQLException {
-        Connection conn = repository.getConnection();
-        conn.setAutoCommit(false);
+        // B10: per-row link plan keyed by id — {outgoing targets, wikilink
+        // targets}. Attribution snapshot lives in interim properties; both are
+        // removed before the JSON is written.
+        java.util.Map<Integer, java.util.List<java.util.List<String>>> linkPlans = new java.util.LinkedHashMap<>();
+        List<SqliteFiles.FilePropertyRow> propertyRows = new ArrayList<>();
 
         // A. Load all path -> id mappings in one query
-        java.util.Map<String, Integer> pathIdMap = new java.util.HashMap<>();
-        String selectSql = "SELECT id, file_path FROM FILES";
-        try (java.sql.Statement stmt = conn.createStatement();
-             java.sql.ResultSet rs = stmt.executeQuery(selectSql)) {
-            while (rs.next()) {
-                pathIdMap.put(rs.getString("file_path"), rs.getInt("id"));
+        java.util.Map<String, Integer> pathIdMap = files.idsByPath();
+
+        for (PksFile pksFile : pksFiles) {
+            Integer id = pathIdMap.get(pksFile.getFilePath());
+            if (id == null) continue;
+
+            List<String> wikiTargets = distinctPrefixed(
+                    pksFile.<String>getAsList("wikilinkTargets"), alias);
+            List<String> markdownTargets = distinctPrefixed(
+                    pksFile.<String>getAsList("markdownTargets"), alias);
+            // JSON `links` keeps the merged-union shape the API has always
+            // exposed: wikilink targets were added during resolution.
+            // Parity rule: an EMPTY list never overwrites the property —
+            // frontmatter `links` may be a scalar string, not a parsed list.
+            List<String> links = distinctPrefixed(
+                    pksFile.<String>getAsList("links"), alias);
+            if (!links.isEmpty()) {
+                pksFile.getMutableProperties().put("links", links);
             }
+            pksFile.getMutableProperties().remove("wikilinkTargets");
+            pksFile.getMutableProperties().remove("markdownTargets");
+
+            // `modified` rides the properties JSON, so recency queries
+            // (ranges, exists, wildcards) resolve through the standard
+            // property machinery like any other value. It is the file's own
+            // mtime (not the index-update wall clock), ISO-8601.
+            long mtime = pksFile.getLastModified();
+            if (mtime > 0) {
+                pksFile.getMutableProperties().put("modified",
+                        java.time.Instant.ofEpochMilli(mtime).toString());
+            }
+
+            linkPlans.put(id, List.of(markdownTargets, wikiTargets));
+
+            String propertiesJson;
+            try {
+                propertiesJson = repository.getJsonMapper().writeValueAsString(pksFile.getMutableProperties());
+            } catch (JsonProcessingException e) {
+                // Fail fast: persisting "{}" would silently falsify this file's properties
+                throw new SQLException("Failed to serialize properties for: " + pksFile.getFilePath(), e);
+            }
+
+            propertyRows.add(new SqliteFiles.FilePropertyRow(
+                    id, propertiesJson, pksFile.getHash(), pksFile.getLastModified(), pksFile.getBody()));
         }
 
-        String updateSql = "UPDATE FILES SET properties = ?, blake3 = ?, file_last_modified = ? WHERE id = ?";
+        files.updateFileProperties(propertyRows);
 
-        try (java.sql.PreparedStatement updateStmt = conn.prepareStatement(updateSql)) {
-            for (PksFile pksFile : pksFiles) {
-                Integer id = pathIdMap.get(pksFile.getFilePath());
-                if (id == null) continue;
+        // B. Batch set links and embeds
+        for (PksFile pksFile : pksFiles) {
+            Integer id = pathIdMap.get(pksFile.getFilePath());
+            if (id == null) continue;
 
-                // Deduplicate links before persisting so JSON properties and LINKS table stay consistent
-                List<String> links = pksFile.<String>getAsList("links").stream().distinct().toList();
-                if (!links.isEmpty()) {
-                    if (alias != null && !alias.isEmpty()) {
-                        String prefix = "@" + alias + "/";
-                        links = links.stream()
-                                .map(link -> link.contains("/") ? link : prefix + link)
-                                .toList();
-                        pksFile.getMutableProperties().put("links", links);
-                    } else {
-                        pksFile.getMutableProperties().put("links", links);
-                    }
-                }
-
-                String propertiesJson;
-                try {
-                    propertiesJson = repository.getJsonMapper().writeValueAsString(pksFile.getMutableProperties());
-                } catch (JsonProcessingException e) {
-                    // Fail fast: persisting "{}" would silently falsify this file's properties
-                    throw new SQLException("Failed to serialize properties for: " + pksFile.getFilePath(), e);
-                }
-
-                updateStmt.setString(1, propertiesJson);
-                if (pksFile.getHash() != null) {
-                    updateStmt.setString(2, pksFile.getHash());
-                } else {
-                    updateStmt.setNull(2, java.sql.Types.VARCHAR);
-                }
-                updateStmt.setLong(3, pksFile.getLastModified());
-                updateStmt.setInt(4, id);
-                updateStmt.addBatch();
-            }
-            updateStmt.executeBatch();
-
-            // B. Batch set links and embeds
-            for (PksFile pksFile : pksFiles) {
-                Integer id = pathIdMap.get(pksFile.getFilePath());
-                if (id == null) continue;
-
-                List<String> links = pksFile.<String>getAsList("links").stream().distinct().toList();
-                if (!links.isEmpty()) {
-                    repository.setLinks(id, links, "outgoing");
-                    repository.setLinks(id, links, "wikilink");
-                }
-
-                repository.addEmbedsToTable(id, pksFile, "bases", "base");
-                repository.addEmbedsToTable(id, pksFile, "luabases", "luabase");
-                repository.addEmbedsToTable(id, pksFile, "embeds", "embed");
+            // setLinks deletes the type's rows before inserting, so both
+            // kinds are refreshed unconditionally — one row per
+            // (source, target, type), never doubled (BUGS.md B10)
+            java.util.List<java.util.List<String>> plan = linkPlans.get(id);
+            if (plan != null) {
+                files.setLinks(id, plan.get(0), "outgoing");
+                files.setLinks(id, plan.get(1), "wikilink");
             }
 
-            conn.commit();
-        } catch (SQLException e) {
-            conn.rollback();
-            throw e;
-        } finally {
-            conn.setAutoCommit(true);
+            files.deleteEmbedsFor(id);
+            files.addEmbedsToTable(id, pksFile, "bases", "base");
+            files.addEmbedsToTable(id, pksFile, "luabases", "luabase");
+            files.addEmbedsToTable(id, pksFile, "embeds", "embed");
         }
     }
 }

@@ -1,9 +1,10 @@
 package io.pskenny.pkspkms.services;
 
+import io.pskenny.pkspkms.repo.sqlite.SqliteFiles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.sql.*;
+import java.sql.SQLException;
 import java.util.*;
 
 /**
@@ -15,7 +16,7 @@ public class WikilinkFinder {
     private static final int CACHE_CAP = 512;
 
     // LRU-bounded cache. Synchronized via synchronizedMap; compound access (containsKey/get/put)
-    // may race on concurrent misses for the same key, but the worst case is a redundant DB query,
+    // may race on concurrent misses for the same key, but the worst case is a redundant DB probe,
     // not data corruption.
     private final Map<String, String> cache = java.util.Collections.synchronizedMap(
             new LinkedHashMap<>(CACHE_CAP, 0.75f, true) {
@@ -26,15 +27,17 @@ public class WikilinkFinder {
             });
 
     /**
-     * Resolves a wikilink string to a full file path using the repository's connection.
-     * Search order:
+     * Resolves a wikilink string to a full file path through the repository's
+     * typed SQL surface (FilesDao) — no raw connection crosses the service
+     * layer (BUGS.md P3). Search order:
      * 1. Direct cache hit (Name, Name.ext, or Path)
-     * 2. Database query against normalized columns in the FILES table
-     * * @param conn The database connection from the repository
-     * @param wikilink The raw wikilink text (e.g., "MyNote" or "[[MyNote#Header]]")
+     * 2. Database probe against normalized columns in the FILES table
+     *
+     * @param cleanLink The wikilink target (e.g., "MyNote" — heading text
+     *                  must already be stripped or it cleans them here)
      * @return The resolved file path or null if not found
      */
-    public String resolveWikilink(Connection conn, String wikilink) {
+    public String resolveWikilink(io.pskenny.pkspkms.repo.sqlite.SqliteFiles files, String wikilink) {
         if (wikilink == null || wikilink.isEmpty()) return null;
 
         // Clean link: drop display alias, then heading/block references
@@ -43,30 +46,32 @@ public class WikilinkFinder {
                 .replace("[[", "")
                 .replace("]]", "");
 
-        // 1. Check local cache
-        if (cache.containsKey(cleanLink)) {
-            return cache.get(cleanLink);
+        // 1. Single-flight cache probe (BUGS.md D2): one synchronized get —
+        // the old containsKey→get pair allowed an LRU eviction in between to
+        // return a false dangler for a known-good link
+        String cached = cache.get(cleanLink);
+        if (cached != null) {
+            return cached;
         }
 
-        // 2. Query the repository for normalized matches
-        String sql = "SELECT file_path FROM FILES WHERE file_path = ? OR file_name_ext = ? OR file_name = ? LIMIT 1";
-
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, cleanLink);
-            pstmt.setString(2, cleanLink);
-            pstmt.setString(3, cleanLink);
-
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    String resolved = rs.getString("file_path");
-                    cache.put(cleanLink, resolved);
-                    return resolved;
-                }
-            }
+        // 2. Deterministic probe (BUGS.md B7 ordering lives in the DAO):
+        //    filename, filename.ext, or full path
+        try {
+            return files.resolveName(cleanLink)
+                    .map(resolved -> {
+                        cache.putIfAbsent(cleanLink, resolved);
+                        return resolved;
+                    })
+                    .orElse(null);
         } catch (SQLException e) {
-            logger.error("Error resolving wikilink via repository: {}", e.getMessage());
+            logger.error("Error resolving wikilink: {}", e.getMessage());
+            return null;
         }
+    }
 
-        return null;
+    // Loader refresh: after a load's deleted-rows phase the cache must not
+    // answer for files that no longer exist.
+    public void clear() {
+        cache.clear();
     }
 }

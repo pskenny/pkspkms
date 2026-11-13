@@ -12,6 +12,7 @@ public final class SQLitePragmas {
             "PRAGMA synchronous = NORMAL;",
             "PRAGMA temp_store = MEMORY;",
             "PRAGMA cache_size = -20000;", // 20MB in-memory database cache
+            "PRAGMA journal_size_limit = 8388608;", // keep burst WAL from staying huge between checkpoints
     };
 
     private SQLitePragmas() {}

@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -33,6 +34,37 @@ public class JavaFileSystemTest {
         Files.writeString(vault.resolve("keep.md"), "content");
 
         assertEquals(List.of("keep.md"), paths());
+    }
+
+    @Test
+    void siblingVaultContentIsRejectedNotBleedThrough() throws IOException {
+        // BUGS.md 11: containment without the trailing separator let a sibling
+        // root's files pass the probe and bleed "/v2/…" into the relative path
+        Path sibling = vault.resolveSibling(vault.getFileName() + "-2");
+        try {
+            Files.createDirectories(sibling);
+            Files.writeString(sibling.resolve("sibling.md"), "content");
+
+            var fs = new JavaFileSystem(vault.toFile());
+            // `..`-relative sibling probe — must be rejected, not bleed through
+            String siblingProbe = java.nio.file.Paths.get("..", String.valueOf(vault.getFileName()) + "-2", "sibling.md").toString();
+            assertThrows(IOException.class,
+                    () -> fs.resolve(siblingProbe),
+                    "sibling content must not resolve into this vault");
+            assertTrue(fs.listFiles(List.of()).stream()
+                    .map(PkmsEntry::relativePath)
+                    .noneMatch(p -> p.contains(vault.getFileName() + "-2")),
+                    "relativePath derivation must not bleed sibling names");
+        } finally {
+            deleteQuietly(sibling);
+        }
+    }
+
+    private static void deleteQuietly(Path dir) {
+        try (var walk = Files.walk(dir)) {
+            walk.sorted(java.util.Comparator.reverseOrder()).map(Path::toFile).forEach(java.io.File::delete);
+        } catch (IOException ignored) {
+        }
     }
 
     @Test

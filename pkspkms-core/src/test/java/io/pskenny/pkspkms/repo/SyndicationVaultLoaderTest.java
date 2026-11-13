@@ -74,6 +74,8 @@ public class SyndicationVaultLoaderTest {
     @AfterEach
     void tearDown() throws IOException {
         Files.deleteIfExists(Path.of("test_syndication.db"));
+        Files.deleteIfExists(Path.of("test_syndication.db-wal"));
+        Files.deleteIfExists(Path.of("test_syndication.db-shm"));
         Files.deleteIfExists(OPML_FILE);
         Files.deleteIfExists(FEED_FILE);
         if (Files.exists(MAIN_DIR)) {

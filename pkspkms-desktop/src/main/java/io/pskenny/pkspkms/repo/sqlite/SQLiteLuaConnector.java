@@ -12,6 +12,14 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * Legacy SQL-side Lua evaluator: registers the `lua_eval` SQLite function.
+ * Tier 4 collapse: no runtime path composes SQL with it anymore — embed
+ * rendering evaluates filters in-process through `LuaBaseProcessor` and the
+ * Application passes a null registrar. Kept for future ad-hoc SQL Lua queries
+ * and for the desktop JNI-robustness test pins (`SQLiteLuaConnectorTest`); the
+ * Android reference in `docs/android/` documents the registration contract.
+ */
 public class SQLiteLuaConnector {
 
     private static final Logger logger = LoggerFactory.getLogger(SQLiteLuaConnector.class);
@@ -34,8 +42,10 @@ public class SQLiteLuaConnector {
                 }
             });
 
-    // Expose cache for direct unit-testing of correctness and eviction
-    public static Map<Long, Map<String, Object>> getCache() {
+    // Expose cache for direct unit-testing of correctness and eviction.
+    // Package-private: the test lives in the same package — the main API does
+    // not publish a test-only accessor (BUGS.md P3).
+    static Map<Long, Map<String, Object>> getCache() {
         return JSON_CACHE;
     }
 

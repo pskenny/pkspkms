@@ -38,20 +38,33 @@ public class CacheEndpointTest {
     private static Server app;
     private SQLitePksFileRepository repository;
 
+    private static final String TEST_DB = "pkspkms-cache-test.db";
+
     @BeforeEach
     void setup() throws IOException {
+        // Index now persists across constructions (schema versioning), so every
+        // test method starts from a fresh DB — several tests mount the `gwern`
+        // alias, which would collide across methods otherwise
+        Files.deleteIfExists(Path.of(TEST_DB));
+        Files.deleteIfExists(Path.of(TEST_DB + "-wal"));
+        Files.deleteIfExists(Path.of(TEST_DB + "-shm"));
         Files.createDirectories(TEST_DIR);
         Files.createDirectories(CACHE_DIR.resolve("@gwern/programming"));
         Files.writeString(CACHE_DIR.resolve("@gwern/programming/haskell.md"), "# Haskell\n\nContent about Haskell.");
         Files.createDirectories(VIRTUAL_DIR);
         Files.writeString(VIRTUAL_DIR.resolve("note.md"), "# Virtual note\n\nFrom the gwern vault.");
+        Files.createDirectories(VIRTUAL_DIR.resolve("programming"));
+        Files.writeString(VIRTUAL_DIR.resolve("programming/haskell.md"), "# Haskell\n\nContent about Haskell.");
     }
 
     @AfterEach
-    void tearDown() {
+    void tearDown() throws IOException {
         if (app != null && app.wasStarted()) {
             app.stop();
         }
+        Files.deleteIfExists(Path.of(TEST_DB));
+        Files.deleteIfExists(Path.of(TEST_DB + "-wal"));
+        Files.deleteIfExists(Path.of(TEST_DB + "-shm"));
 
         for (Path dir : new Path[]{TEST_DIR, VIRTUAL_DIR, OUTSIDE_DIR, Paths.get("target", "outside-abs-cache")}) {
             if (Files.exists(dir)) {
@@ -76,15 +89,24 @@ public class CacheEndpointTest {
         app.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
     }
 
+    // All /cache POSTs carry the anti-drive-by marker (BUGS.md H6); the
+    // dedicated no-marker test pins the gate itself.
+    private static HttpRequest cachePost(String uri) {
+        return HttpRequest.newBuilder()
+                .uri(URI.create(uri))
+                .header("X-Pkspkms-Cache-Request", "1")
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+    }
+
     @Test
     @DisplayName("GET /cache returns success with file and blake3")
     void testCacheEndpointSuccess() throws IOException, InterruptedException, SQLException {
         startServer();
+        // H7: the alias must be known even when the cache copy already exists
+        repository.loadVirtualVault(new JavaFileSystem(VIRTUAL_DIR.toFile()), "gwern");
         HttpClient client = HttpClient.newHttpClient();
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "/cache/@gwern/programming/haskell.md?directory=.pkspkms-cache"))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
+        HttpRequest request = cachePost(BASE_URL + "/cache/@gwern/programming/haskell.md?directory=.pkspkms-cache");
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -100,10 +122,7 @@ public class CacheEndpointTest {
     void testCacheEndpointFileNotFound() throws IOException, InterruptedException, SQLException {
         startServer();
         HttpClient client = HttpClient.newHttpClient();
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "/cache/@gwern/nonexistent.md?directory=.pkspkms-cache"))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
+        HttpRequest request = cachePost(BASE_URL + "/cache/@gwern/nonexistent.md?directory=.pkspkms-cache");
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -117,10 +136,7 @@ public class CacheEndpointTest {
     void testCacheEndpointMissingDirectory() throws IOException, InterruptedException, SQLException {
         startServer();
         HttpClient client = HttpClient.newHttpClient();
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "/cache/@gwern/programming/haskell.md"))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
+        HttpRequest request = cachePost(BASE_URL + "/cache/@gwern/programming/haskell.md");
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -134,10 +150,7 @@ public class CacheEndpointTest {
     void testCacheEndpointInvalidPath() throws IOException, InterruptedException, SQLException {
         startServer();
         HttpClient client = HttpClient.newHttpClient();
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "/cache/@gwern?directory=.pkspkms-cache"))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
+        HttpRequest request = cachePost(BASE_URL + "/cache/@gwern?directory=.pkspkms-cache");
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -150,11 +163,9 @@ public class CacheEndpointTest {
     @DisplayName("GET /cache carries no CORS headers")
     void testCacheEndpointNoCors() throws IOException, InterruptedException, SQLException {
         startServer();
+        repository.loadVirtualVault(new JavaFileSystem(VIRTUAL_DIR.toFile()), "gwern");
         HttpClient client = HttpClient.newHttpClient();
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "/cache/@gwern/programming/haskell.md?directory=.pkspkms-cache"))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
+        HttpRequest request = cachePost(BASE_URL + "/cache/@gwern/programming/haskell.md?directory=.pkspkms-cache");
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -182,10 +193,7 @@ public class CacheEndpointTest {
     void testCacheEndpointInvalidDirectory() throws IOException, InterruptedException, SQLException {
         startServer();
         HttpClient client = HttpClient.newHttpClient();
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "/cache/@gwern/programming/haskell.md?directory=nonexistent-dir"))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
+        HttpRequest request = cachePost(BASE_URL + "/cache/@gwern/programming/haskell.md?directory=nonexistent-dir");
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -204,10 +212,7 @@ public class CacheEndpointTest {
         Files.writeString(VIRTUAL_DIR.resolve("note #1.md"), "hash note");
         HttpClient client = HttpClient.newHttpClient();
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "/cache/@gwern/note%20%231.md?directory=.pkspkms-cache"))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
+        HttpRequest request = cachePost(BASE_URL + "/cache/@gwern/note%20%231.md?directory=.pkspkms-cache");
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         assertEquals(200, response.statusCode(), "Encoded # must resolve to the literal file");
@@ -224,10 +229,7 @@ public class CacheEndpointTest {
         repository.loadVirtualVault(new JavaFileSystem(VIRTUAL_DIR.toFile()), "gwern");
         HttpClient client = HttpClient.newHttpClient();
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "/cache/@gwern/note.md?directory=.pkspkms-cache"))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
+        HttpRequest request = cachePost(BASE_URL + "/cache/@gwern/note.md?directory=.pkspkms-cache");
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         assertEquals(200, response.statusCode(), "First click should cache the file");
@@ -236,6 +238,7 @@ public class CacheEndpointTest {
 
         HttpRequest bareRequest = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/cache/gwern/note.md?directory=.pkspkms-cache"))
+                .header("X-Pkspkms-Cache-Request", "1")
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         HttpResponse<String> bareResponse = client.send(bareRequest, HttpResponse.BodyHandlers.ofString());
@@ -249,10 +252,7 @@ public class CacheEndpointTest {
         repository.loadVirtualVault(new JavaFileSystem(VIRTUAL_DIR.toFile()), "gwern");
         HttpClient client = HttpClient.newHttpClient();
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "/cache/@gwern/..%2F..%2Fsecret.md?directory=.pkspkms-cache"))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
+        HttpRequest request = cachePost(BASE_URL + "/cache/@gwern/..%2F..%2Fsecret.md?directory=.pkspkms-cache");
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         assertEquals(404, response.statusCode(), "Traversal location must be rejected");
@@ -267,10 +267,7 @@ public class CacheEndpointTest {
         repository.loadVirtualVault(new JavaFileSystem(VIRTUAL_DIR.toFile()), "gwern");
         HttpClient client = HttpClient.newHttpClient();
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "/cache/gwern/note.md?directory=../outside-cache"))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
+        HttpRequest request = cachePost(BASE_URL + "/cache/gwern/note.md?directory=../outside-cache");
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         assertNotEquals(200, response.statusCode(), "Escaping directory must be rejected");
@@ -291,6 +288,7 @@ public class CacheEndpointTest {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/cache/@gwern/note.md?directory="
                         + URLEncoder.encode(absoluteCacheDir, StandardCharsets.UTF_8)))
+                .header("X-Pkspkms-Cache-Request", "1")
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -316,5 +314,58 @@ public class CacheEndpointTest {
 
         assertNotEquals(200, response.statusCode(), "Absolute directory outside the vault must be rejected");
         assertFalse(Files.exists(Paths.get("target", "outside-abs-cache")), "No directory may be created");
+    }
+
+    @Test
+    @DisplayName("POST /cache without the X-Pkspkms-Cache-Request marker is refused (H6)")
+    void testCachePostWithoutGateHeaderRejected() throws IOException, InterruptedException, SQLException {
+        startServer();
+        repository.loadVirtualVault(new JavaFileSystem(VIRTUAL_DIR.toFile()), "gwern");
+        HttpClient client = HttpClient.newHttpClient();
+
+        // The form-POST shape: URL carries the parameters, body empty, no
+        // custom headers possible from a cross-site form
+        HttpRequest formShaped = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/cache/@gwern/note.md?directory=.pkspkms-cache"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> response = client.send(formShaped, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(403, response.statusCode(), "marker-less POST must be refused");
+        assertTrue(response.body().contains("X-Pkspkms-Cache-Request"),
+                "error should name the missing header: " + response.body());
+        assertFalse(Files.exists(CACHE_DIR.resolve("@gwern/note.md")), "no copy may happen");
+    }
+
+    @Test
+    @DisplayName("POST /cache rejects an unknown alias even when the path exists in the vault (H7)")
+    void testCacheUnknownAliasRejectedEvenWhenFileExists() throws IOException, InterruptedException, SQLException {
+        startServer();
+        // The target exists IN THE VAULT at the cache path — the old fast
+        // path served it with no alias check at all
+        Files.createDirectories(CACHE_DIR.resolve("@nogwern"));
+        Files.writeString(CACHE_DIR.resolve("@nogwern/note.md"), "exists in main vault");
+        HttpClient client = HttpClient.newHttpClient();
+
+        HttpResponse<String> response = client.send(
+                cachePost(BASE_URL + "/cache/@nogwern/note.md?directory=.pkspkms-cache"),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(404, response.statusCode(), "unknown alias must not be served from the vault: " + response.body());
+        assertTrue(response.body().contains("\"status\":\"error\""), response.body());
+    }
+
+    @Test
+    @DisplayName("POST /cache requires an existing location in the known alias (H7 follow-through)")
+    void testCacheKnownAliasMissingLocationRejected() throws IOException, InterruptedException, SQLException {
+        startServer();
+        repository.loadVirtualVault(new JavaFileSystem(VIRTUAL_DIR.toFile()), "gwern");
+        HttpClient client = HttpClient.newHttpClient();
+
+        HttpResponse<String> response = client.send(
+                cachePost(BASE_URL + "/cache/@gwern/missing-from-virtual.md?directory=.pkspkms-cache"),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(404, response.statusCode(), "known alias + missing file must stay 404");
     }
 }

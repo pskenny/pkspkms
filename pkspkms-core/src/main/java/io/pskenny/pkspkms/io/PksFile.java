@@ -10,14 +10,12 @@ public final class PksFile {
     private Map<String, Object> properties;
     private String hash;
     private long lastModified;
+    // Raw markdown minus frontmatter — NOT serialized into properties. Kept in
+    // memory per changed file during a load, persisted into FILES.body by the
+    // DAO (the FTS5 index reads this column at query time).
+    private String body;
 
     public PksFile(String filePath, Map<String, Object> properties) {
-        this.properties = new LinkedHashMap<>(properties);
-        this.properties.put("filePath", filePath);
-    }
-
-    public PksFile(java.io.File file, String directory, Map<String, Object> properties) {
-        String filePath = getFilePath(file, directory);
         this.properties = new LinkedHashMap<>(properties);
         this.properties.put("filePath", filePath);
     }
@@ -26,6 +24,7 @@ public final class PksFile {
         this.properties = deepCopy(source.properties);
         this.hash = source.hash;
         this.lastModified = source.lastModified;
+        this.body = source.body;
     }
 
     public PksFile(PksFile source, String newFilePath) {
@@ -33,6 +32,7 @@ public final class PksFile {
         this.properties.put("filePath", newFilePath);
         this.hash = source.hash;
         this.lastModified = source.lastModified;
+        this.body = source.body;
     }
 
     // Copies are independent: without deep-copying lists, a copied file's
@@ -46,13 +46,16 @@ public final class PksFile {
         }
         return copy;
     }
-
     private String getFilePath(java.io.File file, String directory) {
         try {
             String dirCanonical = new java.io.File(directory).getCanonicalPath();
             String fileCanonical = file.getCanonicalPath();
-            if (!fileCanonical.startsWith(dirCanonical)) {
-                throw new IllegalStateException("File " + fileCanonical + " is not under " + dirCanonical);
+            // Separator-aware containment: without the separator, a sibling
+            // vault path (`/vault-backup`) passes the startsWith probe and the
+            // returned relative path bleeds the sibling's directory name
+            if (!fileCanonical.startsWith(dirCanonical + java.io.File.separator)) {
+                throw new IllegalStateException("File " + fileCanonical
+                        + " is not under " + dirCanonical);
             }
             return fileCanonical.substring(dirCanonical.length() + 1)
                     .replace(java.io.File.separatorChar, '/');
@@ -99,6 +102,14 @@ public final class PksFile {
 
     public void setLastModified(long lastModified) {
         this.lastModified = lastModified;
+    }
+
+    public String getBody() {
+        return this.body;
+    }
+
+    public void setBody(String body) {
+        this.body = body;
     }
 
     /**

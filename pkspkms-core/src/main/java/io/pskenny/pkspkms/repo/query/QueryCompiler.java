@@ -3,12 +3,19 @@ package io.pskenny.pkspkms.repo.query;
 import java.util.ArrayList;
 import java.util.List;
 
+
 /**
  * Compiles the query AST to parameterized SQLite SQL over FILES.properties.
  * Every comparison is a dual probe: the scalar value (json_extract) or any
  * array element (json_each). All keys and values are bound parameters.
  */
 public final class QueryCompiler {
+
+    // text: clause handling (FTS5 full-text, side-by-side with property search).
+    // When no text: clause exists, compiled SQL is byte-identical to before.
+    private static final String TEXT_FIELD = "text";
+
+    private boolean textProbe;
 
     public CompiledQuery compile(Query query) {
         return compile(query, PropertyTypes.empty());
@@ -17,8 +24,9 @@ public final class QueryCompiler {
     public CompiledQuery compile(Query query, PropertyTypes types) {
         StringBuilder sql = new StringBuilder();
         List<Object> params = new ArrayList<>();
+        textProbe = false;
         assemble(query.clauses(), types, sql, params);
-        return new CompiledQuery(sql.toString(), params);
+        return new CompiledQuery(sql.toString(), params, textProbe);
     }
 
     // Lucene flat-clause semantics: MUSTs AND; SHOULDs OR (only when no MUSTs);
@@ -61,6 +69,11 @@ public final class QueryCompiler {
     }
 
     private String node(QueryNode n, PropertyTypes types, List<Object> params) {
+        String textField = textFieldOf(n);
+        if (textField != null) {
+            textProbe = true;
+            return textProbeSql(n, params);
+        }
         if (n instanceof QueryNode.FieldEq f) {
             return fieldEq(f.field(), f.value(), types, params);
         }
@@ -99,13 +112,70 @@ public final class QueryCompiler {
         throw new IllegalStateException("Unknown query node: " + n);
     }
 
+    // --- text: probes (FTS5 full-text, side-by-side with property search) ---
+
+    private static String textFieldOf(QueryNode n) {
+        if (n instanceof QueryNode.FieldEq f) {
+            return TEXT_FIELD.equals(f.field()) ? TEXT_FIELD : null;
+        }
+        if (n instanceof QueryNode.FieldWildcard w) {
+            return TEXT_FIELD.equals(w.field()) ? TEXT_FIELD : null;
+        }
+        if (n instanceof QueryNode.FieldExists f) {
+            return TEXT_FIELD.equals(f.field()) ? TEXT_FIELD : null;
+        }
+        return null;
+    }
+
+    /**
+     * One text clause = a bound FTS5 MATCH probe. Wrapped double quotes make
+     * multi-word phrases and reserved words (and/or/not) literal; a trailing
+     * {@code *} (suffix wildcard) rides outside the quotes per FTS5 syntax.
+     */
+    private String textProbeSql(QueryNode n, List<Object> params) {
+        String arg;
+        if (n instanceof QueryNode.FieldEq f) {
+            arg = '"' + f.value().replace("\"", "\"\"") + '"';
+        } else if (n instanceof QueryNode.FieldWildcard w) {
+            String pattern = w.pattern();
+            if (!pattern.endsWith("*")) {
+                // interior `*`/`?` — FTS5 allows suffix-only prefix queries
+                throw new QueryParseException(-1,
+                        "text: wildcards must be a suffix (e.g. rust*)");
+            }
+            String token = pattern.substring(0, pattern.length() - 1);
+            if (token.contains("*") || token.contains("?") || token.contains("\"")) {
+                throw new QueryParseException(-1,
+                        "text: wildcards must be a suffix (e.g. rust*)");
+            }
+            arg = '"' + token.replace("\"", "\"\"") + "\"*";
+        } else if (n instanceof QueryNode.FieldExists) {
+            // text:* = body exists: match every indexed row
+            arg = null;
+        } else {
+            throw new QueryParseException(-1, "text: does not support this form");
+        }
+
+        if (arg == null) {
+            // text:* = "has body text": `<> ''` — production binaries hold ''
+            // (v3 NOT NULL DEFAULT), so `IS NOT NULL` counted every .mp4/.png
+            // row; a NULL body (raw tables) would fail the probe too → doubly safe
+            return "FILES.body <> ''";
+        }
+        params.add(arg);
+        return "FILES.id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?)";
+    }
+
     // Comparison compiled according to the declared property type; UNDECLARED
     // keeps the legacy shape (bound sniffed as number or text).
     private String fieldEq(String field, String value, PropertyTypes types, List<Object> params) {
         String path = jsonPath(field);
         switch (types.typeOf(field)) {
             case NUMBER: {
-                Object v = Double.parseDouble(value);
+                // Typed comparison: garbage must surface as the query's parse
+                // error (HTTP 400 / MCP tool error), not a raw
+                // NumberFormatException leaking as a 500 (BUGS.md M7a)
+                Object v = parseNumber(value, field);
                 params.add(path);
                 params.add(v);
                 params.add(path);
@@ -144,7 +214,10 @@ public final class QueryCompiler {
         String loOp = r.loIncl() ? ">=" : ">";
         String hiOp = r.hiIncl() ? "<=" : "<";
         StringBuilder sb = new StringBuilder("(");
-        boolean first = true;
+        // Track processed bounds separately: the old `first` flag only flipped
+        // on the LO branch, so an open-lower range emitted `1=1` after the hi
+        // predicate and SQLite rejected the whole WHERE (near "1")
+        boolean any = false;
         PropertyTypes.Kind kind = types.typeOf(r.field());
         if (r.lo() != null) {
             Object lo = boundFor(kind, r.lo());
@@ -154,10 +227,10 @@ public final class QueryCompiler {
             params.add(path);
             params.add(lo);
             sb.append(" OR EXISTS (SELECT 1 FROM json_each(properties, ?) WHERE ").append(elementCompare(kind)).append(" ").append(loOp).append(" ?))");
-            first = false;
+            any = true;
         }
         if (r.hi() != null) {
-            if (!first) {
+            if (any) {
                 sb.append(" AND ");
             }
             Object hi = boundFor(kind, r.hi());
@@ -167,8 +240,10 @@ public final class QueryCompiler {
             params.add(path);
             params.add(hi);
             sb.append(" OR EXISTS (SELECT 1 FROM json_each(properties, ?) WHERE ").append(elementCompare(kind)).append(" ").append(hiOp).append(" ?))");
+            any = true;
         }
-        if (first) {
+        if (!any) {
+            // open-open range ([:] with * bounds) = match all
             sb.append("1=1");
         }
         return sb.append(")").toString();
@@ -196,10 +271,19 @@ public final class QueryCompiler {
     // Bound form per declared kind: NUMBER binds numerically; UNDECLARED keeps the legacy sniff
     private static Object boundFor(PropertyTypes.Kind kind, String bound) {
         return switch (kind) {
-            case NUMBER -> Double.parseDouble(bound);
+            case NUMBER -> parseNumber(bound, bound);
             case DATE, DATETIME, TEXT, CHECKBOX, MULTITEXT -> bound;
             case UNDECLARED -> numberOrText(bound);
         };
+    }
+
+    // Typed numeric bound: parse errors ride the query's parse error (M7a)
+    private static Double parseNumber(String value, String field) {
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException e) {
+            throw new QueryParseException(-1, "not a number: '" + value + "' (field:" + field + ")");
+        }
     }
 
     private String anyField(QueryNode inner, List<Object> params) {
@@ -247,9 +331,13 @@ public final class QueryCompiler {
         return sb.isEmpty() ? "1=1" : sb.toString();
     }
 
-    // JSON path with a quoted key, so kebab-case and friends work
-    private static String jsonPath(String field) {
-        return "$.\"" + field.replace("\"", "\\\"") + "\"";
+    // JSON path with a quoted key, so kebab-case and friends work; shared
+    // with the facet SQL surface in FilesDao (same escaping contract).
+    // Runtime-verified against the sqlite driver (JsonPathEscapeProbeTest):
+    // D3 — `"` rides as `\"`, and a literal `\` must double to `\\` (a raw
+    // backslash silently yields null).
+    public static String jsonPath(String field) {
+        return "$.\"" + field.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
     // Numeric-looking bounds bind as numbers; everything else (ISO dates, ...) as text.

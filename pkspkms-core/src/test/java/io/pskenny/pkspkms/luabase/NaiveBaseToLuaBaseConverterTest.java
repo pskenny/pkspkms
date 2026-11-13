@@ -1,6 +1,7 @@
 package io.pskenny.pkspkms.luabase;
 
 import io.pskenny.pkspkms.io.PksFile;
+import io.pskenny.pkspkms.io.YamlParser;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -164,7 +165,7 @@ views:
 
         Map<String, Object> spec = new YamlParser().parse(actual);
         LuaBaseProcessor processor = new LuaBaseProcessor();
-        var actualTable = processor.process(spec, files);
+        var actualTable = processor.processOverCorpus(spec, java.util.List.copyOf(files.values()));
         String expectedTable = """
 | filePath | access |
 |---|---|
@@ -213,7 +214,7 @@ views:
 
         Map<String, Object> spec = new YamlParser().parse(actual);
         LuaBaseProcessor processor = new LuaBaseProcessor();
-        var actualTable = processor.process(spec, files);
+        var actualTable = processor.processOverCorpus(spec, java.util.List.copyOf(files.values()));
         String expectedTable = """
 | Path |
 |---|
@@ -258,7 +259,7 @@ views:
 
         Map<String, Object> spec = new YamlParser().parse(actual);
         LuaBaseProcessor processor = new LuaBaseProcessor();
-        var actualTable = processor.process(spec, files);
+        var actualTable = processor.processOverCorpus(spec, java.util.List.copyOf(files.values()));
         String expectedTable = """
 | Path |
 |---|
@@ -366,7 +367,7 @@ views:
 
         String actual = naiveBaseToLuaBaseConverter.convert(input);
         Map<String, Object> spec = new YamlParser().parse(actual);
-        String table = new LuaBaseProcessor().process(spec, files);
+        String table = new LuaBaseProcessor().processOverCorpus(spec, java.util.List.copyOf(files.values()));
 
         String expectedTable = """
                 | filePath | size |
@@ -414,7 +415,7 @@ views:
         }}));
 
         Map<String, Object> spec = naiveBaseToLuaBaseConverter.convertToMap(input);
-        String table = new LuaBaseProcessor().process(spec, files);
+        String table = new LuaBaseProcessor().processOverCorpus(spec, java.util.List.copyOf(files.values()));
 
         assertTrue(table.contains("idea.md"));
         assertFalse(table.contains("done.md"));
@@ -437,7 +438,7 @@ views:
         files.put("out.jpg", new PksFile("Pictures/2019/out.jpg", new HashMap<>()));
 
         Map<String, Object> spec = naiveBaseToLuaBaseConverter.convertToMap(input);
-        String table = new LuaBaseProcessor().process(spec, files);
+        String table = new LuaBaseProcessor().processOverCorpus(spec, java.util.List.copyOf(files.values()));
 
         assertTrue(table.contains("Pictures/2018/in.jpg"));
         assertFalse(table.contains("Pictures/2019"));
@@ -468,7 +469,7 @@ views:
         files.put("diary2024.md", new PksFile("Notes/Diary/2024-12-31.md", new HashMap<>()));
 
         Map<String, Object> spec = naiveBaseToLuaBaseConverter.convertToMap(input);
-        String table = new LuaBaseProcessor().process(spec, files);
+        String table = new LuaBaseProcessor().processOverCorpus(spec, java.util.List.copyOf(files.values()));
 
         assertTrue(table.contains("2025-01-01.md"));
         assertFalse(table.contains("2024-12-31"));
@@ -497,7 +498,7 @@ views:
         }}));
 
         Map<String, Object> spec = naiveBaseToLuaBaseConverter.convertToMap(input);
-        String table = new LuaBaseProcessor().process(spec, files);
+        String table = new LuaBaseProcessor().processOverCorpus(spec, java.util.List.copyOf(files.values()));
 
         assertTrue(table.contains("empty.md"));
         assertFalse(table.contains("set.md"));
@@ -524,7 +525,7 @@ views:
         }}));
 
         Map<String, Object> spec = naiveBaseToLuaBaseConverter.convertToMap(input);
-        String table = new LuaBaseProcessor().process(spec, files);
+        String table = new LuaBaseProcessor().processOverCorpus(spec, java.util.List.copyOf(files.values()));
 
         assertTrue(table.contains("all.md"));
         assertFalse(table.contains("partial.md"));
@@ -556,7 +557,7 @@ views:
         }}));
 
         Map<String, Object> spec = naiveBaseToLuaBaseConverter.convertToMap(input);
-        String table = new LuaBaseProcessor().process(spec, files);
+        String table = new LuaBaseProcessor().processOverCorpus(spec, java.util.List.copyOf(files.values()));
 
         assertTrue(table.contains("bm.md"));
         assertFalse(table.contains("note.md"));
@@ -609,7 +610,7 @@ views:
         }}));
 
         Map<String, Object> spec = naiveBaseToLuaBaseConverter.convertToMap(input);
-        String table = new LuaBaseProcessor().process(spec, files);
+        String table = new LuaBaseProcessor().processOverCorpus(spec, java.util.List.copyOf(files.values()));
 
         assertTrue(table.contains("Hoppo"), "Hoppo note must match name substring");
         assertTrue(table.contains("Seamus Boland"), "Seamus Boland note must match");

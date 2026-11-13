@@ -31,6 +31,8 @@ public class SQLitePksFileRepositoryTest {
     @BeforeEach
     void setUp() throws IOException {
         Files.deleteIfExists(Path.of(TEST_DB_PATH));
+        Files.deleteIfExists(Path.of(TEST_DB_PATH + "-wal"));
+        Files.deleteIfExists(Path.of(TEST_DB_PATH + "-shm"));
         Files.createDirectories(VIRTUAL_DIR);
         try {
             Files.createDirectories(TEST_DIR);
@@ -40,6 +42,8 @@ public class SQLitePksFileRepositoryTest {
     @AfterEach
     void tearDown() throws IOException {
         Files.deleteIfExists(Path.of(TEST_DB_PATH));
+        Files.deleteIfExists(Path.of(TEST_DB_PATH + "-wal"));
+        Files.deleteIfExists(Path.of(TEST_DB_PATH + "-shm"));
 
         for (Path dir : new Path[]{TEST_DIR, VIRTUAL_DIR}) {
             if (Files.exists(dir)) {
@@ -500,9 +504,98 @@ public class SQLitePksFileRepositoryTest {
         }
     }
 
+    // --- BUGS.md B19/B9: normalized embed lookup + no leak on failure ---
+
     @Test
-    void loadVirtualVault_defersEmbedRenderingToProcessEmbeds() throws Exception {
-        // Embed rendering is global over all vaults, so it must run once after
+    void basesLookupNormalizesWhitespace() throws Exception {
+        createFile(TEST_DIR, "note.md", Map.of(), """
+                ```base
+                views:
+                  - type: table
+                    order:
+                      - 'getPropertyValue(file, "filePath"), "Path"'
+                ```
+                """);
+
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository(DB_URL, null, new JavaFileSystem(TEST_DIR.toFile()))) {
+            repository.loadDirectoryIntoRepository();
+
+            // Hand-retyped view with different internal whitespace: still finds
+            // the stored row (old code required the exact original_match).
+            String rendered = repository.getMarkdownFromBase(
+                    "views:\n  - type: table\n    order:\n      - 'getPropertyValue(file, \"filePath\"), \"Path\"'");
+            assertTrue(rendered.contains("| Path |"), "normalized lookup renders: " + rendered);
+            assertTrue(rendered.contains("| note.md |"), rendered);
+        }
+    }
+
+    // --- BUGS.md B14/B15/B16: fenced demo content + BOM ---
+    @Test
+    void fencedWikilinksNotIndexed() throws Exception {
+        createFile(TEST_DIR, "Real.md", Map.of(), "real target");
+        createFile(TEST_DIR, "note.md", Map.of(), """
+                [[Real]]
+                ```md
+                Look at this: [[Real]] inside a demo fence.
+                ```
+                """);
+
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository(DB_URL, null, new JavaFileSystem(TEST_DIR.toFile()))) {
+            repository.loadDirectoryIntoRepository();
+            var results = repository.searchRegular(Q("filePath:note.md"));
+            assertEquals(1, results.size());
+            var links = results.get(0).getAsList("links");
+            assertEquals(1, links.size(), "only the real link indexed");
+            assertEquals("Real.md", links.get(0));
+        }
+    }
+
+    @Test
+    void fencedBaseBlocksNotEmbedded() throws Exception {
+        createFile(TEST_DIR, "note.md", Map.of(), """
+                ```base
+                views:
+                  - type: table
+                ```
+                Demo (fenced — must not seed an EMBEDS row):
+                ```
+                ```base
+                views:
+                  - type: list
+                ```
+                """);
+
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository(DB_URL, null, new JavaFileSystem(TEST_DIR.toFile()))) {
+            repository.loadDirectoryIntoRepository();
+            var results = repository.searchRegular(Q("filePath:note.md"));
+            assertEquals(1, results.size());
+            assertTrue(results.get(0).getAsList("bases").size() >= 1, "real base queued");
+
+            try (Statement stmt = repository.getConnection().createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM EMBEDS")) {
+                rs.next();
+                assertEquals(1, rs.getInt(1), "only the real base seeded, the fenced demo skipped");
+            }
+        }
+    }
+
+    @Test
+    void bomPrefixedFrontmatterStillParsed() throws Exception {
+        // U+FEFF prefix: B16 used to make frontmatter detection miss entirely
+        String bom = "\uFEFF";
+        Files.createDirectories(TEST_DIR);
+        Files.writeString(TEST_DIR.resolve("bom.md"), bom + "---\ntitle: Bom Note\ntags:\n  - Bom\n---\nbody");
+
+        try (SQLitePksFileRepository repository = new SQLitePksFileRepository(DB_URL, null, new JavaFileSystem(TEST_DIR.toFile()))) {
+            repository.loadDirectoryIntoRepository();
+            var results = repository.searchRegular(Q("tags:Bom"));
+            assertEquals(1, results.size(), "frontmatter parsed despite BOM");
+            assertEquals("Bom Note", results.get(0).getMutableProperties().get("title"));
+        }
+    }
+
+    @Test
+    void loadVirtualVault_defersEmbedRenderingToProcessEmbeds() throws Exception {        // Embed rendering is global over all vaults, so it must run once after
         // every vault mounts — a mount only seeds EMBEDS rows
         createFile(TEST_DIR, "keep.md", Map.of(), "");
         createFile(VIRTUAL_DIR, "note.md", Map.of(), """

@@ -1,1 +1,1 @@
-{"resultSize":2,"files":[{"filePath":"test1.md","wikilinks":["test2"],"links":["test2.md"]},{"filePath":"test2.md","backlinks":["test1.md"]}]}
+{"resultSize":2,"files":[{"filePath":"test1.md","wikilinks":["test2"],"links":["test2.md"],"wikilinkSpans":[{"kind":"wikilink","target":"test2","line":1,"offset":0}],"modified":"2025-01-01T00:00:00Z"},{"filePath":"test2.md","backlinks":["test1.md"],"modified":"2025-01-01T00:00:00Z"}]}

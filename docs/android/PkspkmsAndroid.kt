@@ -1,10 +1,9 @@
 package com.example.pkspkms
 
 import io.pskenny.pkspkms.Server
-import io.pskenny.pkspkms.repo.SQLitePksFileRepository
-import io.pskenny.pkspkms.repo.sqlite.SQLiteLuaConnector
-import io.pskenny.pkspkms.io.VaultFileSystem
-import io.pskenny.pkspkms.io.fs.JavaFileVaultFileSystem
+import io.pskenny.pkspkms.io.fs.JavaFileSystem
+import io.pskenny.pkspkms.io.fs.PkmsFileSystem
+import io.pskenny.pkspkms.repo.sqlite.SQLitePksFileRepository
 import java.io.File
 
 object PkspkmsAndroid {
@@ -24,27 +23,24 @@ object PkspkmsAndroid {
         val dbPath = "/data/data/$packageName/databases/pkspkms.db"
         File(dbPath).parentFile?.mkdirs()
 
-        // Construct the vault filesystem. JavaFileVaultFileSystem wraps a
-        // java.io.File root and provides listFiles/openInput/openOutput.
+        // Construct the vault filesystem. JavaFileSystem wraps a java.io.File
+        // root and provides listFiles/resolve/openInput/openOutput.
         //
         // For SAF (Storage Access Framework) based access, implement the
-        // VaultFileSystem interface with DocumentFile + ContentResolver.
-        // See the README for details.
-        val vaultFs: VaultFileSystem = JavaFileVaultFileSystem(File(vaultPath))
+        // PkmsFileSystem interface with ContentResolver + DocumentsContract
+        // yourself. See the README for details.
+        val vaultFs: PkmsFileSystem = JavaFileSystem(File(vaultPath))
 
-        // Construct the repository. The second argument registers lua_eval
-        // as a SQLite custom function via xerial's JNI binding — identical
-        // to the desktop path. This enables searchWithLuaFilter() to push
-        // Lua filters into SQL for in-database evaluation.
+        // Construct the repository. The registrar argument is null: embed
+        // filters evaluate in-process (pure-Java luaj), so nothing is
+        // registered on the connection.
         //
-        // WARNING: SQLiteSchema.init() currently DROPs and recreates all
-        // tables on every new SQLitePksFileRepository construction. Keep
-        // the repository as an app-lifetime singleton — do NOT construct it
-        // inside an Activity or it will wipe the database on every
-        // launch/rotation.
+        // The SQLite schema is persistent and versioned in core; opening an
+        // older index migrates it forward. Keep the repository as an
+        // app-lifetime singleton anyway: one JDBC connection per session.
         val repository = SQLitePksFileRepository(
             "jdbc:sqlite:$dbPath",
-            SQLiteLuaConnector.luaFunctionRegistrar(),
+            null,
             vaultFs
         )
 

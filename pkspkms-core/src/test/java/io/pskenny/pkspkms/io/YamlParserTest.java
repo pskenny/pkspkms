@@ -1,6 +1,6 @@
-package io.pskenny.pkspkms.luabase;
+package io.pskenny.pkspkms.io;
 
-import io.pskenny.pkspkms.luabase.YamlParser;
+import io.pskenny.pkspkms.io.YamlParser;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

@@ -8,7 +8,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class MarkdownWikilinkReader {
-    private static final Pattern WIKILINK_PATTERN =
+    public static final Pattern PATTERN_WIKILINK =
             Pattern.compile("\\[\\[(.*?)]]");
 
     public List<String> getWikilinks(String content) {
@@ -16,8 +16,14 @@ public class MarkdownWikilinkReader {
         if (content == null || content.isEmpty()) {
             return new ArrayList<>();
         }
-        Matcher matcher = WIKILINK_PATTERN.matcher(content);
+        Matcher matcher = PATTERN_WIKILINK.matcher(content);
         while (matcher.find()) {
+            // D1: blank inners ([[ ]]) and pure self-anchors ([[#h]]) are
+            // not targets in either engine (parity with the flex walk)
+            String inner = matcher.group(1).strip();
+            if (inner.isEmpty() || inner.startsWith("#")) {
+                continue;
+            }
             embeds.add(matcher.group(1));
         }
         return new ArrayList<>(embeds);

@@ -13,16 +13,34 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class TableRenderer {
     private static final Logger logger = LoggerFactory.getLogger(TableRenderer.class);
 
-    public String render(List<String> orderSpec, Collection<PksFile> files, LuaBaseInterpreter luaBaseInterpreter) {
-        List<String> headers = new ArrayList<>();
-        if (orderSpec == null || orderSpec.isEmpty()) {
-            // what do you do when you aren't given an order? every file has a filePath
-            orderSpec = new ArrayList<>(1);
-            orderSpec.add("getPropertyValue(file, \"filePath\", \"\"), \"Path\"");
+    // BUGS.md D1: blank order entries drop ONCE here — they used to compile-error
+    // per row (a `{"", ""}` colSpec recompiles+rethrows every row)
+    static List<String> nonBlank(List<String> orderSpec) {
+        if (orderSpec == null) {
+            return List.of();
         }
-        orderSpec.forEach(colSpec ->
-                headers.add(colSpec.substring(colSpec.lastIndexOf(",") + 3, colSpec.length() - 1))
-        );
+        List<String> cleaned = new ArrayList<>(orderSpec.size());
+        for (String entry : orderSpec) {
+            if (entry != null && !entry.isBlank()) {
+                cleaned.add(entry);
+            }
+        }
+        return cleaned;
+    }
+
+    public String render(List<String> orderSpec, Collection<PksFile> files, LuaBaseInterpreter luaBaseInterpreter) {
+        orderSpec = nonBlank(orderSpec);
+        if (orderSpec.isEmpty()) {
+            // what do you do when you aren't given an order? every file has a filePath
+            orderSpec = List.of("getPropertyValue(file, \"filePath\", \"\"), \"Path\"");
+        }
+        List<String[]> columns = new ArrayList<>();
+        orderSpec.forEach(colSpec -> columns.add(ColSpec.parse(colSpec)));
+
+        List<String> headers = new ArrayList<>();
+        for (String[] column : columns) {
+            headers.add(CellEscapes.mdCell(column[1]));
+        }
 
         StringBuilder sb = new StringBuilder();
         sb.append("| " + String.join(" | ", headers) + " |")
@@ -30,28 +48,30 @@ public class TableRenderer {
                 .append("|" + "---|".repeat(headers.size() - 1) + "---|")
                 .append("\n");
 
-        List<String> finalOrderSpec1 = orderSpec;
         // Render-time failures are counted, not spammed: one row's failing
-        // expression used to log a full stack trace per row (thousands of lines)
+        // expression used to log a full stack trace per row (thousands of lines).
+        // M8: the catch is PER COLUMN — a failing middle column renders its
+        // own ` error |` marker while remaining columns still render, so the
+        // cell count always matches the header.
         final AtomicInteger failures = new AtomicInteger();
         files.forEach(pksFile -> {
             StringBuilder row = new StringBuilder("|");
             java.util.Map<String, Object> fileProperties = pksFile.getMutableProperties();
-            try {
-                finalOrderSpec1.forEach(colSpec -> {
-                    String expression = colSpec.substring(0, colSpec.lastIndexOf(","));
-                    String propValue = luaBaseInterpreter.evaluateLuaExpression(expression, fileProperties).tojstring();
-                    row.append(" ").append(propValue).append(" |");
-                });
-            } catch(Exception e) {
-                failures.incrementAndGet();
-                row.append(" error |");
+            for (String[] column : columns) {
+                try {
+                    String propValue = LuaCells.text(
+                            luaBaseInterpreter.evaluateLuaExpression(column[0], fileProperties));
+                    row.append(" ").append(CellEscapes.mdCell(propValue)).append(" |");
+                } catch (Throwable t) {
+                    failures.incrementAndGet();
+                    row.append(" error |");
+                }
             }
             sb.append(row);
             sb.append("\n");
         });
         if (failures.get() > 0) {
-            logger.warn("Table render: {} row(s) had failing expressions", failures.get());
+            logger.warn("Table render: {} cell(s) had failing expressions", failures.get());
         }
         return sb.toString();
     }

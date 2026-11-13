@@ -36,7 +36,9 @@ dependencies {
     // --- Core transitive dependencies ---
     // These should resolve automatically via Maven transitive resolution, but
     // if your build excludes transitive deps, declare them explicitly:
-    implementation 'org.commonmark:commonmark:0.27.1'
+    implementation 'com.vladsch.flexmark:flexmark:0.64.8'
+    implementation 'com.vladsch.flexmark:flexmark-ext-wikilink:0.64.8'
+    implementation 'com.vladsch.flexmark:flexmark-ext-gfm-tasklist:0.64.8'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.18.6'
     implementation 'org.luaj:luaj-jse:3.0.1'
     implementation 'org.yaml:snakeyaml:2.6'

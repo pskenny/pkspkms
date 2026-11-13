@@ -41,6 +41,8 @@ public class VirtualVaultLoaderTest {
     @AfterEach
     void tearDown() throws IOException {
         Files.deleteIfExists(Path.of(TEST_DB_PATH));
+        Files.deleteIfExists(Path.of(TEST_DB_PATH + "-wal"));
+        Files.deleteIfExists(Path.of(TEST_DB_PATH + "-shm"));
 
         for (Path dir : new Path[]{MAIN_DIR, VIRTUAL_DIR}) {
             if (Files.exists(dir)) {

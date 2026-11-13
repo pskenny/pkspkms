@@ -1,6 +1,7 @@
 package io.pskenny.pkspkms.luabase;
 
 import io.pskenny.pkspkms.io.PksFile;
+import io.pskenny.pkspkms.io.YamlParser;
 import io.pskenny.pkspkms.repo.sqlite.SQLitePksFileRepository;
 import org.junit.jupiter.api.Test;
 
@@ -33,7 +34,7 @@ public class LuaBaseProcessorTest {
 
         YamlParser ybp = new YamlParser();
         LuaBaseProcessor luaBaseProcessor = new LuaBaseProcessor();
-        String table = luaBaseProcessor.process(ybp.parse(testLuaBaseYaml), files);
+        String table = luaBaseProcessor.processOverCorpus(ybp.parse(testLuaBaseYaml), java.util.List.copyOf(files.values()));
         String expected = """
             | property |
             |---|
@@ -65,7 +66,7 @@ public class LuaBaseProcessorTest {
         YamlParser ybp = new YamlParser();
         LuaBaseProcessor luaBaseProcessor = new LuaBaseProcessor();
 
-        String table = luaBaseProcessor.process(ybp.parse(testLuaBaseYaml), files);
+        String table = luaBaseProcessor.processOverCorpus(ybp.parse(testLuaBaseYaml), java.util.List.copyOf(files.values()));
         String expected = """
             | Path |
             |---|
@@ -102,7 +103,7 @@ public class LuaBaseProcessorTest {
 
         YamlParser ybp = new YamlParser();
         LuaBaseProcessor luaBaseProcessor = new LuaBaseProcessor();
-        String table = luaBaseProcessor.process(ybp.parse(testLuaBaseYaml), files);
+        String table = luaBaseProcessor.processOverCorpus(ybp.parse(testLuaBaseYaml), java.util.List.copyOf(files.values()));
         String expected = """
             | Path | Price | PPU |
             |---|---|---|
@@ -132,7 +133,7 @@ public class LuaBaseProcessorTest {
 
         YamlParser ybp = new YamlParser();
         LuaBaseProcessor luaBaseProcessor = new LuaBaseProcessor();
-        String table = luaBaseProcessor.process(ybp.parse(testLuaBaseYaml), files);
+        String table = luaBaseProcessor.processOverCorpus(ybp.parse(testLuaBaseYaml), java.util.List.copyOf(files.values()));
         String expected = """
             | Path | Price | PPU |
             |---|---|---|
@@ -162,7 +163,7 @@ public class LuaBaseProcessorTest {
 
         YamlParser ybp = new YamlParser();
         LuaBaseProcessor luaBaseProcessor = new LuaBaseProcessor();
-        String actual = luaBaseProcessor.process(ybp.parse(testLuaBaseYaml), files);
+        String actual = luaBaseProcessor.processOverCorpus(ybp.parse(testLuaBaseYaml), java.util.List.copyOf(files.values()));
         String expected = """
             | Path | tags |
             |---|---|
@@ -198,7 +199,7 @@ public class LuaBaseProcessorTest {
 
         YamlParser ybp = new YamlParser();
         LuaBaseProcessor luaBaseProcessor = new LuaBaseProcessor();
-        String actual = luaBaseProcessor.process(ybp.parse(testLuaBaseYaml), files);
+        String actual = luaBaseProcessor.processOverCorpus(ybp.parse(testLuaBaseYaml), java.util.List.copyOf(files.values()));
         String expected = """
             | Price |
             |---|
@@ -234,7 +235,7 @@ public class LuaBaseProcessorTest {
 
         YamlParser ybp = new YamlParser();
         LuaBaseProcessor luaBaseProcessor = new LuaBaseProcessor();
-        String actual = luaBaseProcessor.process(ybp.parse(testLuaBaseYaml), files);
+        String actual = luaBaseProcessor.processOverCorpus(ybp.parse(testLuaBaseYaml), java.util.List.copyOf(files.values()));
         String expected = """
             | Price |
             |---|
@@ -264,7 +265,7 @@ creationDate: 2025-08-21
 
         YamlParser ybp = new YamlParser();
         LuaBaseProcessor luaBaseProcessor = new LuaBaseProcessor();
-        String actual = luaBaseProcessor.process(ybp.parse(testLuaBaseYaml), files);
+        String actual = luaBaseProcessor.processOverCorpus(ybp.parse(testLuaBaseYaml), java.util.List.copyOf(files.values()));
         String expected = """
             | creationDate |
             |---|
@@ -307,7 +308,7 @@ creationDate: 2025-08-21
         YamlParser ybp = new YamlParser();
         LuaBaseProcessor luaBaseProcessor = new LuaBaseProcessor();
 
-        String actualWithNil = luaBaseProcessor.process(ybp.parse(testLuaBaseYamlWithNilProperty), files);
+        String actualWithNil = luaBaseProcessor.processOverCorpus(ybp.parse(testLuaBaseYamlWithNilProperty), java.util.List.copyOf(files.values()));
         String expectedWithNil = """
             | Price |
             |---|
@@ -317,7 +318,7 @@ creationDate: 2025-08-21
             """;
         assertEquals(expectedWithNil, actualWithNil);
 
-        String actualWithEmptyString = luaBaseProcessor.process(ybp.parse(testLuaBaseYamlWithEmptyStringProperty), files);
+        String actualWithEmptyString = luaBaseProcessor.processOverCorpus(ybp.parse(testLuaBaseYamlWithEmptyStringProperty), java.util.List.copyOf(files.values()));
         String expectedWithEmptyString = """
             | Price |
             |---|
@@ -352,7 +353,7 @@ creationDate: 2025-08-21
         YamlParser ybp = new YamlParser();
         LuaBaseProcessor luaBaseProcessor = new LuaBaseProcessor();
 
-        String actual = luaBaseProcessor.process(ybp.parse(testLuaBaseYaml), files);
+        String actual = luaBaseProcessor.processOverCorpus(ybp.parse(testLuaBaseYaml), java.util.List.copyOf(files.values()));
         String expected = """
             | Price |
             |---|
@@ -366,14 +367,16 @@ creationDate: 2025-08-21
     @Test
     void viewSpecFrom_missingViews_throws() {
         assertThrows(IllegalArgumentException.class,
-                () -> new LuaBaseProcessor().process(Map.of(), Map.of()));
+                () -> new LuaBaseProcessor().processOverCorpus(Map.of(), java.util.List.of()));
     }
 
     @Test
-    void filterYamlToExpression_unexpectedType_throws() {
+    void filterYamlToExpression_unexpectedType_tolerated() {
+        // B4 semantics: parse-failure shapes descend to a tolerant "true"
+        // (match-all) with a warning instead of throwing — a broken filter
+        // leaves a broken note, not a broken server
         LuaBaseProcessor p = new LuaBaseProcessor();
-        assertThrows(IllegalArgumentException.class,
-                () -> p.filterYamlToExpression(42));
+        assertEquals("true", p.filterYamlToExpression(42));
     }
 
     @Test
@@ -385,7 +388,7 @@ creationDate: 2025-08-21
         Map<String, PksFile> files = new HashMap<>();
         files.put("a.md", new PksFile("a.md", new HashMap<>()));
 
-        String result = new LuaBaseProcessor().process(spec, files);
+        String result = new LuaBaseProcessor().processOverCorpus(spec, java.util.List.copyOf(files.values()));
 
         String expected = """
             | Path |
@@ -404,7 +407,7 @@ creationDate: 2025-08-21
         Map<String, PksFile> files = new HashMap<>();
         files.put("a.md", new PksFile("a.md", new HashMap<>()));
 
-        String result = new LuaBaseProcessor().process(spec, files);
+        String result = new LuaBaseProcessor().processOverCorpus(spec, java.util.List.copyOf(files.values()));
 
         String expected = """
             | Path |
@@ -421,7 +424,7 @@ creationDate: 2025-08-21
               - type: graffle
             """);
         assertThrows(IllegalArgumentException.class,
-                () -> new LuaBaseProcessor().process(spec, Map.of()));
+                () -> new LuaBaseProcessor().processOverCorpus(spec, java.util.List.of()));
     }
 
     @Test
@@ -440,7 +443,7 @@ creationDate: 2025-08-21
         files.put("b.md", new PksFile("b.md", new HashMap<>()));
         files.put("c.md", new PksFile("c.md", new HashMap<>(Map.of("price", 3))));
 
-        String result = new LuaBaseProcessor().process(new YamlParser().parse(yaml), files);
+        String result = new LuaBaseProcessor().processOverCorpus(new YamlParser().parse(yaml), java.util.List.copyOf(files.values()));
         String expected = """
             | Price |
             |---|
@@ -491,7 +494,7 @@ creationDate: 2025-08-21
             put("price", 3.5);
         }}));
 
-        String result = new LuaBaseProcessor().process(new YamlParser().parse(yaml), files);
+        String result = new LuaBaseProcessor().processOverCorpus(new YamlParser().parse(yaml), java.util.List.copyOf(files.values()));
 
         assertTrue(result.indexOf("| 3.5 |") < result.indexOf("| 10 |"), "3.5 must sort before 10");
     }
@@ -513,7 +516,7 @@ creationDate: 2025-08-21
             put("creationDate", "2025-08-22");
         }}));
 
-        String result = new LuaBaseProcessor().process(new YamlParser().parse(yaml), files);
+        String result = new LuaBaseProcessor().processOverCorpus(new YamlParser().parse(yaml), java.util.List.copyOf(files.values()));
 
         assertTrue(result.indexOf("| 2025-08-21 |") < result.indexOf("| 2025-08-22 |"),
                 "Mixed date types must render and sort deterministically");
@@ -646,6 +649,11 @@ creationDate: 2025-08-21
     }
 
     private SQLitePksFileRepository characterRepo(Path dir) throws Exception {
+        // Fresh DB per call: the schema now persists across constructions, and
+        // the three characterization tests must not see each other's notes.
+        java.nio.file.Files.deleteIfExists(java.nio.file.Path.of("test_embed_char.db"));
+        java.nio.file.Files.deleteIfExists(java.nio.file.Path.of("test_embed_char.db-wal"));
+        java.nio.file.Files.deleteIfExists(java.nio.file.Path.of("test_embed_char.db-shm"));
         // Inline lua_eval matching SQLiteLuaConnector's callback contract — the
         // connector itself is desktop-scoped and unavailable to core tests
         java.util.function.Consumer<java.sql.Connection> registrar = conn -> {

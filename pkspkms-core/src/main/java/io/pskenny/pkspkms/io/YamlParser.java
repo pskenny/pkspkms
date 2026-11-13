@@ -1,4 +1,4 @@
-package io.pskenny.pkspkms.luabase;
+package io.pskenny.pkspkms.io;
 
 import org.yaml.snakeyaml.Yaml;
 
@@ -21,7 +21,7 @@ public class YamlParser {
     // Obsidian tolerates tab indentation; SnakeYAML does not. Expand every tab inside
     // the leading whitespace run (spaces and tabs may interleave), 1 tab = 4 spaces.
     // Tabs inside quoted scalars are preserved.
-    static String expandLeadingTabs(String yaml) {
+    public static String expandLeadingTabs(String yaml) {
         if (yaml == null || yaml.indexOf('\t') == -1) {
             return yaml;
         }
