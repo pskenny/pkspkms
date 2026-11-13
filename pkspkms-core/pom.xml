@@ -15,6 +15,13 @@
     <packaging>jar</packaging>
 
     <name>pkspkms-core</name>
+    <licenses>
+        <license>
+            <name>GNU General Public License, version 3 or later</name>
+            <url>https://www.gnu.org/licenses/gpl-3.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
     <description>Core library for PKSPKMS – parsers, repository, query engine, and HTTP server.</description>
 
     <dependencies>

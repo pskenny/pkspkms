@@ -76,6 +76,7 @@ uninstall() {
     local files=(
         "$BIN_DIR/pkspkms"
         "$SHARE_DIR/pkspkms.jar"
+        "$SHARE_DIR/LICENSE"
     )
 
     for f in "${files[@]}"; do
@@ -121,6 +122,10 @@ mkdir -p "$BIN_DIR" "$SHARE_DIR"
 # Install JAR
 cp "$JAR_SOURCE" "$SHARE_DIR/pkspkms.jar"
 info "  Installed: $SHARE_DIR/pkspkms.jar"
+
+# Ship the license text with the binary (GPL-3.0 section 6)
+cp "$SCRIPT_DIR/LICENSE" "$SHARE_DIR/LICENSE"
+info "  Installed: $SHARE_DIR/LICENSE"
 
 # Create wrapper script
 cat > "$BIN_DIR/pkspkms" <<EOF

@@ -28,3 +28,7 @@ I use it for a few things:
 
 I made it as a companion to Obsidian Markdown editor. As you can tell from what and where I use it in
 the list above that it's grown over time and borne child projects.
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).
