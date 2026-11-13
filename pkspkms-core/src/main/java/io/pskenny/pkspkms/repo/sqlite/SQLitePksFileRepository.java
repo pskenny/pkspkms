@@ -507,13 +507,15 @@ public class SQLitePksFileRepository implements SqliteRepository {
     @Override
     public void searchRegular(CompiledQuery query, java.util.function.Consumer<PksFile> consumer) {
         // property-only queries keep byte-identical SQL; a text: probe adds the
-        // FTS join (snippet + bm25 ordering)
+        // FTS join (snippet + bm25 ordering). Both order deterministically:
+        // property-only by file_path, text by bm25 relevance — never FS walk
+        // order, which made CI diverge from local machines.
         String select = query.textProbe()
                 ? "SELECT FILES.*, snippet(files_fts, 0, '==', '==', '…', 12) AS textsnippet FROM FILES "
                         + "LEFT JOIN files_fts ON files_fts.rowid = FILES.id WHERE "
                 : "SELECT * FROM FILES WHERE ";
         String sqlQuery = select + query.sql()
-                + (query.textProbe() ? " ORDER BY files_fts.rowid IS NULL, bm25(files_fts)" : "");
+                + (query.textProbe() ? " ORDER BY files_fts.rowid IS NULL, bm25(files_fts)" : " ORDER BY file_path");
         // one pass to read, one batched LINKS pass for backlinks — the
         // per-row backlinksOf(id) probe used to be the only N+1 scaling cliff
         record Row(String path, int id, Map<String, Object> props) {}
