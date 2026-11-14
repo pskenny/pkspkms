@@ -1,6 +1,6 @@
 # PKSPKMS
 
-> [!NOTE]
+> [!CAUTION]
 > This is personal software that uses LLMs recklessly to make changes.  It is not 
 serious software. READMEs are for humans so this file is written by my own ten fingers for your 
 eyeball(s). All the other docs are for LLMs so don't bother reading that verbosity/vomit. If 
