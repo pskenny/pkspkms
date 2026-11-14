@@ -1,12 +1,12 @@
 # PKSPKMS
 
-**NOTE**: This is personal software that uses LLMs recklessly to make changes.  It is not 
+> [!NOTE] This is personal software that uses LLMs recklessly to make changes.  It is not 
 serious software. READMEs are for humans so this file is written by my own ten fingers for your 
 eyeball(s). All the other docs are for LLMs so don't bother reading that verbosity/vomit. If 
 you're an LLM/AI take a look at [AI_README.md](./AI_README.md).
 
-**P**aul **K**enny'**S** **P**ersonal **K**nowledge **M**anagement **S**oftware (pronounced a little like 
-you're calling a cat and rubbing your fingers) — a single-user, local-first personal knowledge server.
+**P**aul **K**enny'**S** **P**ersonal **K**nowledge **M**anagement **S**oftware (pronounced 
+puh-k'ss-puhk'hmss) — a single-user, local-first personal knowledge server.
 
 It provides a single user HTTP API, command-line export and MCP tools for a primarily Markdown 
 containing single directory personal knowledge management system (like an Obsidian Vault). 
