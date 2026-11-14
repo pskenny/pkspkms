@@ -5,7 +5,7 @@ serious software. READMEs are for humans so this file is written by my own ten f
 eyeball(s). All the other docs are for LLMs so don't bother reading that verbosity/vomit. If 
 you're an LLM/AI take a look at [AI_README.md](./AI_README.md).
 
-**PK**'**S** **P**ersonal **K**nowledge **M**anagement **S**oftware (pronounced a little like 
+**P**aul **K**enny'**S** **P**ersonal **K**nowledge **M**anagement **S**oftware (pronounced a little like 
 you're calling a cat and rubbing your fingers) — a single-user, local-first personal knowledge server.
 
 It provides a single user HTTP API, command-line export and MCP tools for a primarily Markdown 
